@@ -9,6 +9,13 @@
 import Foundation
 import SQLite
 
+enum AdjustTableCommand {
+    case none // TODO: get rid of
+    case update(at: Int, count: Int)
+    case insert(at: Int, count: Int)
+    case remove(at: Int, count: Int)
+}
+
 struct Person {
     let identifier: String
     var name: String
@@ -39,6 +46,16 @@ class DatabaseManager {
     // Assume true until it's not
     var hasMoreRows = true
     
+    var nextRowIndex: Int = 0
+    
+    // New caching system
+    var cachedWindowSize: Int = 20
+    var n_window: Int = 0
+    var n_head: Int = 0
+    var n_tail: Int = 0
+    // Sorted list of identifiers in current window
+    var cachedIdentifiers: [String] = [] // TODO: Could also store full entries in memory?
+
     init?(fileUrl: URL) {
         self.fileUrl = fileUrl
         
@@ -73,7 +90,9 @@ class DatabaseManager {
     
     func generateRows(numRows: Int) {
         Array(0..<numRows).forEach { row in
-            let uuid = UUID().uuidString
+            // let uuid = UUID().uuidString
+            let uuid = String(format: "%05d", nextRowIndex)
+            nextRowIndex = nextRowIndex + 1
             let names = [
                 "John",
                 "Paul",
@@ -158,4 +177,162 @@ class DatabaseManager {
         
         return numFetched
     }
+    
+    
+    // New system
+    func numFuzzyItems() -> Int {
+        return n_tail + n_window + n_head
+    }
+    
+    func effectiveWindowStartIndex() -> Int {
+        return n_tail
+    }
+    
+    func effectiveWindowEndIndex() -> Int {
+        return n_tail + n_window
+    }
+    
+    func cachedPerson(at effectiveRow: Int) -> Person? {
+        // Figure out actual index in cache
+        let cacheIndex = effectiveRow - n_tail
+        if cacheIndex < 0 {
+//            print("cacheIndex < 0: effectiveRow \(effectiveRow) - n_tail \(n_tail) = \(cacheIndex)")
+            return nil
+        } else if cacheIndex >= cachedIdentifiers.count {
+//            print("cacheIndex < \(cachedIdentifiers.count): effectiveRow \(effectiveRow) - n_tail \(n_tail) = \(cacheIndex)")
+            return nil
+        } else {
+            let identifier = cachedIdentifiers[cacheIndex]
+            return person(for: identifier)
+        }
+    }
+    
+    func prefetchCache(cachedWindowSize: Int) {
+        self.cachedWindowSize = cachedWindowSize
+        n_head = 0
+        n_tail = 0
+        
+        // Fetch window size elements from database...
+        cachedIdentifiers = []
+        do {
+            for row in try connection.prepare(peopleTable.limit(cachedWindowSize)) {
+                let identifier = row[idColumn]
+                cachedIdentifiers.append(identifier)
+            }
+        } catch {
+            print("Error getting people \(error)")
+        }
+        
+        n_window = cachedIdentifiers.count
+    }
+    
+    func shiftCacheWindow(up n: Int) -> (Int, AdjustTableCommand) {
+//        print("shiftCacheWindow(up: \(n) )")
+        
+        // Try to fetch n rows *before* the first cached item
+        let query: QueryType
+        
+        if let lastItemIdentifier = cachedIdentifiers.first {
+            query = peopleTable.filter(idColumn < lastItemIdentifier).order(idColumn.desc).limit(n)
+        } else {
+            // We don't have any entries at all yet... so just search for ALL items
+            query = peopleTable.order(idColumn.desc).limit(n)
+        }
+        
+        var prependedIdentifiers: [String] = []
+        do {
+            let result = try connection.prepare(query)
+            // Insert in reverse order by inserting each item at 0
+            while let personRow = result.makeIterator().next() {
+                prependedIdentifiers.insert(personRow[idColumn], at: 0)
+            }
+        } catch {
+            print("Error loading person row")
+        }
+        
+//        print("prepending \(prependedIdentifiers.count) items")
+        
+        // Drop items at END of cache so we always have a max window size
+        let numOverflowItems = max(0, cachedIdentifiers.count + prependedIdentifiers.count - cachedWindowSize)
+        cachedIdentifiers.removeLast(numOverflowItems)
+        
+        cachedIdentifiers.insert(contentsOf: prependedIdentifiers, at: 0)
+        
+        // Head should get bigger with whatever got pushed out of window INTO the head
+        n_head = n_head + numOverflowItems
+        
+        let adjustTableCommand: AdjustTableCommand
+        let carriedItems = min(n_tail, numOverflowItems)
+        if carriedItems < numOverflowItems {
+            // We carried items from the ether at the tail, so we need to signal to the caller that we
+            // must insert that many entries into the tail
+            let insertedCount = numOverflowItems - carriedItems
+            adjustTableCommand = .insert(at: 0, count: insertedCount)
+            // TODO: we should also update carriedItems along with the insert...
+        } else {
+            adjustTableCommand = .update(at: 0, count: carriedItems)
+        }
+        // Tail should get smaller from whatever we had to carry
+        n_tail = n_tail - carriedItems
+
+        n_window = cachedIdentifiers.count // n_window should always be cachedIdentifiers size
+        
+        // We've shifted up by an amount, so return that
+        return (numOverflowItems, adjustTableCommand)
+    }
+    
+    func shiftCacheWindow(down n: Int) -> (Int, AdjustTableCommand) {
+//        print("shiftCacheWindow(down: \(n) )")
+        
+        // Try to fetch n rows beyond the last item
+        let query: QueryType
+        
+        if let lastItemIdentifier = cachedIdentifiers.last {
+            query = peopleTable.filter(idColumn > lastItemIdentifier).limit(n)
+        } else {
+            // We don't have any entries at all yet... so just search for ALL items
+            query = peopleTable
+        }
+
+        var appendedIdentifiers: [String] = []
+        do {
+            let result = try connection.prepare(query)
+            while let personRow = result.makeIterator().next() {
+                appendedIdentifiers.append(personRow[idColumn])
+            }
+        } catch {
+            print("Error loading person row")
+        }
+        
+//        print("appending \(appendedIdentifiers.count) items")
+        
+        // Remove items at start so we always have a max window size
+        let numOverflowItems = max(0, cachedIdentifiers.count + appendedIdentifiers.count - cachedWindowSize)
+        
+        cachedIdentifiers.removeFirst(numOverflowItems)
+        cachedIdentifiers.append(contentsOf: appendedIdentifiers)
+        
+        // Recalculate things
+        let old_n_head_index = n_tail + n_window
+        n_tail = n_tail + numOverflowItems // tail picks up whatever was pushed OUT of window out the back
+        n_window = cachedIdentifiers.count // n_window should always be cachedIdentifiers size
+        
+        // We've pulled items from the head, so reduce it as necessary
+        let adjustTableCommand: AdjustTableCommand
+        let carriedItems = min(n_head, numOverflowItems)
+        if carriedItems < numOverflowItems {
+            // We carried items from the ether, so we need to signal to the caller that we
+            // must insert that many entries
+            let insertedCount = numOverflowItems - carriedItems
+            adjustTableCommand = .insert(at: old_n_head_index, count: insertedCount)
+        } else {
+            //adjustTableCommand = .none
+            adjustTableCommand = .update(at: old_n_head_index, count: carriedItems)
+        }
+        n_head = n_head - carriedItems
+        
+        // We've shifted down by an amount, so return that
+        return (numOverflowItems, adjustTableCommand)
+    }
+
 }
