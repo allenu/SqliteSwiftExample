@@ -73,11 +73,11 @@
 			children = (
 				B76BA95923F1323800BB3B87 /* AppDelegate.swift */,
 				B76BA95B23F1323800BB3B87 /* ViewController.swift */,
+				B76BA9B22402F73200BB3B87 /* DatabaseManager.swift */,
 				B76BA95D23F1323A00BB3B87 /* Assets.xcassets */,
 				B76BA95F23F1323A00BB3B87 /* Main.storyboard */,
 				B76BA96223F1323A00BB3B87 /* Info.plist */,
 				B76BA96323F1323A00BB3B87 /* SqliteSwiftExample.entitlements */,
-				B76BA9B22402F73200BB3B87 /* DatabaseManager.swift */,
 			);
 			path = SqliteSwiftExample;
 			sourceTree = "<group>";

@@ -1,10 +1,36 @@
 # TODOs
 
-- [ ] Make fetch request on a background thread for shifting window -- and ensure SQLite accesses are always on same thread.
+- [ ] Add a search filter
+    - [ ] Add text field that triggers search on each char typed
+    - [ ] Update DatabaseManager
+        - [x] add resetCache() which just sets n_tail = 0, n_window = 0, n_head = 0 and clears cached identifiers
+
+        - [ ] add setCacheWindow(position:, cachedWindowSize:)
+            - will attempt to position the cache pointer to row "position"
+            - will set n_tail to 0 at first and any scroll *up* will load more entries as needed
+            - will set n_head to 0 as well
+            - [ ] if no contents at position, will attempt to get the first cachedWindowSize entries before that position
+
+            - will do the math to figure out if there is overlap between the new position and old one and only fetch enough
+              to cover new position
+              - [ ] Make it still return the tableView insert/update/remove operations required
+
+        - [x] Add "searchFilter" text var which is used for the next query
+        - [x] add currentQuery: QueryType 
+            - [x] Make it so when searchFilter is set, we make it peopleTable.filter(nameColumn == "string")
+            - [x] Make it so that when searchFilter is empty, we just use peopleTable
+
+- [ ] when you scroll by grabbing the scroll bar, the cache window does not keep up
+    - we need to make it support an arbitrary "cache at row N"; but what does that mean exactly in the context
+      of a SQL search? we'd need to be able to know how many results there are and zero in on that row
+      - [ ] Consider reporting the *true* number of rows in the query, if it's even possible ? it might be costly
+            as a SQL query to do a COUNT() of all entries that match a given query
+
+- [-] Make fetch request on a background thread for shifting window -- and ensure SQLite accesses are always on same thread.
       When fetch is done, update the window appropriately. If a fetch request occurs while we're still in the middle of
       a fetch, just drop it.
 
-- [ ] Bug: when you add a new person using the "Add Person" button and then scrol the table view, SQLite crashes
+- [ ] Bug: when you add a new person using the "Add Person" button and then scroll the table view, SQLite crashes
     - It's probably because the row iterator doesn't like the fact that we inserted a new row. Maybe we need to
       refresh the row iterator somehow but maintain our position in it.
 

@@ -11,11 +11,12 @@ import SQLite
 
 class ViewController: NSViewController {
     var databaseManager: DatabaseManager!
-    let itemsPerPage: Int = 30
+    let itemsPerPage: Int = 20
     
     var useNewCacheSystem = true
     
     @IBOutlet weak var tableView: NSTableView!
+    @IBOutlet weak var searchField: NSSearchField!
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -27,11 +28,16 @@ class ViewController: NSViewController {
         databaseManager = DatabaseManager(fileUrl: dbUrl)
         
         databaseManager.setupTables()
-        databaseManager.generateRows(numRows: 100)
+        DispatchQueue.global().async {
+            self.databaseManager.generateRows(numRows: 10000)
+        }
         _ = databaseManager.fetchPeople(numPeople: itemsPerPage * 2)
         databaseManager.prefetchCache(cachedWindowSize: itemsPerPage * 2)
 
         tableView.dataSource = self
+        tableView.delegate = self
+        
+        searchField.delegate = self
         
         // Need to listen to when user scrolls too far
         self.tableView.enclosingScrollView?.postsBoundsChangedNotifications = true
@@ -59,8 +65,7 @@ class ViewController: NSViewController {
             // If we scroll the bottom past 75% of our window, then move our window down
             let fetchTriggerDown: Int = databaseManager.effectiveWindowEndIndex() - itemsPerPage / 2
             let fetchTriggerUp: Int = databaseManager.effectiveWindowStartIndex()
-            if lastVisibleRow >= fetchTriggerDown {
-                print("triggered down")
+            if lastVisibleRow >= fetchTriggerDown || databaseManager.cachedIdentifiers.count == 0 {
                 let shiftResult = databaseManager.shiftCacheWindow(down: itemsPerPage / 2)
                 switch shiftResult.1 {
                 case .none:
@@ -73,7 +78,7 @@ class ViewController: NSViewController {
                         indexSet.insert(index)
                     }
                     self.tableView.beginUpdates()
-                    self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0,1,2,3))
+                    self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0))
                     self.tableView.endUpdates()
                     
                 case .update(let index, let count):
@@ -82,8 +87,9 @@ class ViewController: NSViewController {
                         indexSet.insert(index)
                     }
                     if indexSet.count > 0 {
+//                        print("updating rows from \(index) to \(index + count)")
                         self.tableView.beginUpdates()
-                        self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0,1,2,3))
+                        self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0))
                         self.tableView.endUpdates()
                     }
                     
@@ -102,7 +108,6 @@ class ViewController: NSViewController {
                     assertionFailure("NYI - we detected fewer items than expected at head")
                 }
             } else if firstVisibleRow < fetchTriggerUp {
-                print("adjusting up")
                 let shiftResult = databaseManager.shiftCacheWindow(up: itemsPerPage)
                 switch shiftResult.1 {
                 case .none:
@@ -115,7 +120,7 @@ class ViewController: NSViewController {
                     }
                     if indexSet.count > 0 {
                         self.tableView.beginUpdates()
-                        self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0,1,2,3))
+                        self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0))
                         self.tableView.endUpdates()
                     }
                     
@@ -125,8 +130,9 @@ class ViewController: NSViewController {
                         indexSet.insert(index)
                     }
                     if indexSet.count > 0 {
+//                        print("updating rows from \(index) to \(index + count)")
                         self.tableView.beginUpdates()
-                        self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0,1,2,3))
+                        self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0))
                         self.tableView.endUpdates()
                     }
                     
@@ -179,8 +185,6 @@ extension ViewController: NSTableViewDataSource {
     func tableView(_ tableView: NSTableView, objectValueFor tableColumn: NSTableColumn?, row: Int) -> Any? {
         let fetchedPerson: Person?
         
-        print("requesting object for \(row)")
-        
         if useNewCacheSystem {
             fetchedPerson = databaseManager.cachedPerson(at: row)
         } else {
@@ -202,5 +206,53 @@ extension ViewController: NSTableViewDataSource {
         } else {
             return nil
         }
+    }
+}
+
+extension ViewController: NSTableViewDelegate {
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        
+        let aView = tableView.makeView(withIdentifier: NSUserInterfaceItemIdentifier(rawValue: "MyCellView"), owner: nil) as! NSTableCellView
+        
+        
+//        let view = NSTextField()
+        
+        if let person = databaseManager.cachedPerson(at: row) {
+            aView.textField?.stringValue = "\(person.identifier) - \(person.name)"
+//            view.stringValue = "\(person.identifier) - \(person.name)"
+        } else {
+            aView.textField?.stringValue = "loading..."
+//            view.stringValue = "NOT-CACHED"
+        }
+        
+        return aView
+    }
+}
+
+extension ViewController: NSSearchFieldDelegate {
+    func searchFieldDidStartSearching(_ sender: NSSearchField) {
+        print("searchFieldDidStartSearching: \(sender.stringValue)")
+        
+        databaseManager.searchFilter = sender.stringValue
+        databaseManager.resetCache()
+        databaseManager.prefetchCache(cachedWindowSize: itemsPerPage * 2)
+        tableView.reloadData()
+    }
+    
+    func searchFieldDidEndSearching(_ sender: NSSearchField) {
+        print("searchFieldDidEndSearching")
+        
+        databaseManager.searchFilter = nil
+        databaseManager.resetCache()
+        databaseManager.prefetchCache(cachedWindowSize: itemsPerPage * 2)
+        tableView.reloadData()
+    }
+    
+    func controlTextDidChange(_ obj: Notification) {
+        print("search text did change: \(searchField.stringValue)")
+        databaseManager.searchFilter = searchField.stringValue
+        databaseManager.resetCache()
+        databaseManager.prefetchCache(cachedWindowSize: itemsPerPage * 2)
+        tableView.reloadData()
     }
 }

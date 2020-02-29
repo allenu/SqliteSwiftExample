@@ -43,6 +43,14 @@ class DatabaseManager {
     var fetchedPeople: [String : Person] = [:]
     var peopleRowIterator: RowIterator!
     
+    var currentQuery: QueryType {
+        if let searchFilter = searchFilter {
+            return peopleTable.filter(nameColumn.like("%\(searchFilter)%"))
+        } else {
+            return peopleTable
+        }
+    }
+    
     // Assume true until it's not
     var hasMoreRows = true
     
@@ -55,6 +63,8 @@ class DatabaseManager {
     var n_tail: Int = 0
     // Sorted list of identifiers in current window
     var cachedIdentifiers: [String] = [] // TODO: Could also store full entries in memory?
+    
+    var searchFilter: String?
 
     init?(fileUrl: URL) {
         self.fileUrl = fileUrl
@@ -94,10 +104,12 @@ class DatabaseManager {
             let uuid = String(format: "%05d", nextRowIndex)
             nextRowIndex = nextRowIndex + 1
             let names = [
-                "John",
+                "John Paul",
                 "Paul",
-                "George",
-                "Ringo"
+                "George Smith",
+                "Ringo",
+                "Alice",
+                "Rina"
             ]
             let name = names[ (Int(arc4random()) % names.count) ]
             let weight = 100 + Int64(arc4random() % 50)
@@ -106,6 +118,9 @@ class DatabaseManager {
             let person = Person(identifier: uuid, name: "\(row) - \(name)", weight: weight, age: age)
             print("Creating person: \(person)")
             insert(person: person)
+            
+            // Wait a second
+            usleep(50 * 1000)
         }
         
         // Assume we could fetch more...
@@ -181,7 +196,9 @@ class DatabaseManager {
     
     // New system
     func numFuzzyItems() -> Int {
-        return n_tail + n_window + n_head
+        let n = n_tail + n_window + n_head
+        print("numFuzzyItems = \(n)")
+        return n
     }
     
     func effectiveWindowStartIndex() -> Int {
@@ -215,7 +232,7 @@ class DatabaseManager {
         // Fetch window size elements from database...
         cachedIdentifiers = []
         do {
-            for row in try connection.prepare(peopleTable.limit(cachedWindowSize)) {
+            for row in try connection.prepare(currentQuery.limit(cachedWindowSize)) {
                 let identifier = row[idColumn]
                 cachedIdentifiers.append(identifier)
             }
@@ -233,10 +250,10 @@ class DatabaseManager {
         let query: QueryType
         
         if let lastItemIdentifier = cachedIdentifiers.first {
-            query = peopleTable.filter(idColumn < lastItemIdentifier).order(idColumn.desc).limit(n)
+            query = currentQuery.filter(idColumn < lastItemIdentifier).order(idColumn.desc).limit(n)
         } else {
             // We don't have any entries at all yet... so just search for ALL items
-            query = peopleTable.order(idColumn.desc).limit(n)
+            query = currentQuery.order(idColumn.desc).limit(n)
         }
         
         var prependedIdentifiers: [String] = []
@@ -270,12 +287,14 @@ class DatabaseManager {
             adjustTableCommand = .insert(at: 0, count: insertedCount)
             // TODO: we should also update carriedItems along with the insert...
         } else {
-            adjustTableCommand = .update(at: 0, count: carriedItems)
+            adjustTableCommand = .update(at: n_tail - carriedItems, count: carriedItems)
         }
         // Tail should get smaller from whatever we had to carry
         n_tail = n_tail - carriedItems
 
         n_window = cachedIdentifiers.count // n_window should always be cachedIdentifiers size
+        
+//        print("cache window: \(n_tail) to \(n_tail + n_window) ")
         
         // We've shifted up by an amount, so return that
         return (numOverflowItems, adjustTableCommand)
@@ -288,10 +307,10 @@ class DatabaseManager {
         let query: QueryType
         
         if let lastItemIdentifier = cachedIdentifiers.last {
-            query = peopleTable.filter(idColumn > lastItemIdentifier).limit(n)
+            query = currentQuery.filter(idColumn > lastItemIdentifier).limit(n)
         } else {
             // We don't have any entries at all yet... so just search for ALL items
-            query = peopleTable
+            query = currentQuery.limit(n)
         }
 
         var appendedIdentifiers: [String] = []
@@ -319,20 +338,36 @@ class DatabaseManager {
         
         // We've pulled items from the head, so reduce it as necessary
         let adjustTableCommand: AdjustTableCommand
-        let carriedItems = min(n_head, numOverflowItems)
-        if carriedItems < numOverflowItems {
+        let numNewItems = appendedIdentifiers.count
+        if numNewItems > n_head {
             // We carried items from the ether, so we need to signal to the caller that we
             // must insert that many entries
-            let insertedCount = numOverflowItems - carriedItems
+            let insertedCount = numNewItems - n_head
             adjustTableCommand = .insert(at: old_n_head_index, count: insertedCount)
+            
+            // Head is now empty since we pulled more than what was in there to begin with
+            n_head = 0
         } else {
             //adjustTableCommand = .none
-            adjustTableCommand = .update(at: old_n_head_index, count: carriedItems)
+            adjustTableCommand = .update(at: old_n_head_index, count: numNewItems)
+            n_head = n_head - numNewItems
         }
-        n_head = n_head - carriedItems
+
+//        print("cache window: \(n_tail) to \(n_tail + n_window) ")
         
         // We've shifted down by an amount, so return that
         return (numOverflowItems, adjustTableCommand)
+    }
+    
+    func resetCache() {
+        n_head = 0
+        n_window = 0
+        n_tail = 0
+        cachedIdentifiers = []
+    }
+    
+    func updateCacheWindow(position: Int, cacheWindowSize: Int) {
+        
     }
 
 }
