@@ -39,10 +39,9 @@ class DatabaseManager {
     let weightColumn = Expression<Int64>("weight")
     let ageColumn = Expression<Int64>("age")
     
-    var sortedPeopleIdentifiers: [String] = []
-    var fetchedPeople: [String : Person] = [:]
-    var peopleRowIterator: RowIterator!
+    var nextRowIndex: Int = 0
     
+    // New caching system
     var currentQuery: QueryType {
         if let searchFilter = searchFilter {
             return peopleTable.filter(nameColumn.like("%\(searchFilter)%"))
@@ -51,12 +50,6 @@ class DatabaseManager {
         }
     }
     
-    // Assume true until it's not
-    var hasMoreRows = true
-    
-    var nextRowIndex: Int = 0
-    
-    // New caching system
     var cachedWindowSize: Int = 20
     var n_window: Int = 0
     var n_head: Int = 0
@@ -92,7 +85,6 @@ class DatabaseManager {
                 t.column(weightColumn)
                 t.column(ageColumn)
             })
-            peopleRowIterator = try! connection.prepareRowIterator(peopleTable.select(idColumn))
         } catch {
             // Maybe already created table?
         }
@@ -122,9 +114,6 @@ class DatabaseManager {
             // Wait a second
             usleep(50 * 1000)
         }
-        
-        // Assume we could fetch more...
-        hasMoreRows = true
     }
     
     func insert(person: Person) {
@@ -139,19 +128,6 @@ class DatabaseManager {
             print("inserted row \(rowid)")
         } catch {
             print("Failed to insert person with identifier \(person.identifier) -- may already exist? error: \(error)")
-        }
-    }
-    
-    func numFetchedPeople() -> Int {
-        return sortedPeopleIdentifiers.count
-    }
-    
-    func person(at row: Int) -> Person? {
-        if row < sortedPeopleIdentifiers.count {
-            let identifier = sortedPeopleIdentifiers[row]
-            return person(for: identifier)
-        } else {
-            return nil
         }
     }
     
@@ -174,25 +150,6 @@ class DatabaseManager {
         
         return nil
     }
-    
-    // Fetch more people into the list
-    func fetchPeople(numPeople: Int) -> Int {
-        var numFetched: Int = 0
-        
-        while numFetched < numPeople {
-            if let personIdentifier = peopleRowIterator.next() {
-                sortedPeopleIdentifiers.append(personIdentifier[idColumn])
-                numFetched = numFetched + 1
-            } else {
-                // No more
-                hasMoreRows = false
-                break
-            }
-        }
-        
-        return numFetched
-    }
-    
     
     // New system
     func numFuzzyItems() -> Int {
