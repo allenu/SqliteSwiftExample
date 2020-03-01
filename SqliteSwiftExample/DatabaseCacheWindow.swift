@@ -124,6 +124,7 @@ func growCacheWindow(from oldCacheWindowState: CacheWindowState, delta: Int, num
 }
 
 protocol DatabaseCacheWindowDataSource {
+    func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, searchFilterContains item: Person) -> Bool
     func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, itemFor identifier: String) -> Person?
     func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, fetch limitCount: Int, itemsBefore identifier: String?) -> [String]
     func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, fetch limitCount: Int, itemsAfter identifier: String?) -> [String]
@@ -131,6 +132,8 @@ protocol DatabaseCacheWindowDataSource {
 }
 
 class DatabaseCacheWindow {
+    let maxCacheWindowSize = 80
+
     let dataSource: DatabaseCacheWindowDataSource
     var cachedIdentifiers: [String] = [] // TODO: Could also store full entries in memory?
     var cacheWindowState = CacheWindowState(numKnownItems: 0, windowOffset: 0, windowSize: 0)
@@ -183,6 +186,56 @@ class DatabaseCacheWindow {
             tableOperations = updatedIndexes.map { updatedIndex in
                 return TableOperation.update(at: cacheWindowState.windowOffset + updatedIndex, count: 1)
             }
+        } else if insertedIdentifiers.count > 0 {
+            
+            var tmpTableOperations: [TableOperation] = []
+            
+            insertedIdentifiers.forEach { identifier in
+                if let person = dataSource.databaseCacheWindow(self, itemFor: identifier) {
+                    if dataSource.databaseCacheWindow(self, searchFilterContains: person) {
+                        
+                        let notAlreadyInCache = !cachedIdentifiers.contains(identifier)
+                        let belongsInRange: Bool
+                        if let firstIdentifier = cachedIdentifiers.first,
+                            let lastIdentifier = cachedIdentifiers.last {
+                            
+                            let greaterThanFirst = identifier > firstIdentifier
+                            let lesserThanLast = identifier < lastIdentifier || cachedIdentifiers.count < maxCacheWindowSize-1
+                            belongsInRange = greaterThanFirst && lesserThanLast
+                        } else {
+                            belongsInRange = true
+                        }
+                        
+                        if notAlreadyInCache && belongsInRange {
+                            // Yes, this should be inserted. Find out where
+                            let insertIndex: Int
+                            if let insertBeforeIndex = cachedIdentifiers.firstIndex(where: { $0 > identifier }) {
+                                insertIndex = insertBeforeIndex
+                            } else {
+                                insertIndex = cachedIdentifiers.count
+                            }
+                            
+                            // Do not insert if it would go at the end and would cause cache to grow too long
+                            if insertIndex < maxCacheWindowSize {
+                                cachedIdentifiers.insert(identifier, at: insertIndex)
+                                tmpTableOperations.append(.insert(at: insertIndex, count: 1))
+
+                                // Drop item at end if this gets too large
+                                if cachedIdentifiers.count == maxCacheWindowSize {
+                                    cachedIdentifiers.removeLast()
+                                }
+
+                                cacheWindowState = CacheWindowState(numKnownItems: cacheWindowState.numKnownItems + 1,
+                                                                    windowOffset: cacheWindowState.windowOffset,
+                                                                    windowSize: cachedIdentifiers.count)
+                            }
+                        }
+                    }
+                }
+            }
+
+            tableOperations = tmpTableOperations
+            
         } else {
             // TODO: if anything inserted ...
             // - see if it would appear in the range of our view of rows
@@ -202,7 +255,6 @@ class DatabaseCacheWindow {
     
     func setCacheWindow(newOffset: Int, newSize: Int) -> [TableOperation] {
         
-        let maxCacheWindowSize = 80
         let newSize = min(maxCacheWindowSize, newSize)
 //        assert(newSize < maxCacheWindowSize)
         

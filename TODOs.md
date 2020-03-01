@@ -6,10 +6,24 @@
 
 - [ ] More update logic
     - [x] if we delete items from the cache window, fetch items towards end to keep it same size
-    - [ ] handle insertion updates
+    - [ ] Make setting the searchFilter trigger a notification to reload the database
+    - [ ] Make it so that the tableView allows insert if it's tacking onto the end of the current window *AND* we're "viewing"
+          towards the end of the window ... how do we indicate that we are looking at the tail end of the window, though?
+    - [ ] Make UI auto scroll to end if it detects new entries added to window ?
+
+    - [ ] Tweak the cache window size against the visible rect for optimum loading of new entries
+
+    - [x] handle insertion updates
         - if we insert items on the fly, have it insert into the cachedWindow if it matches query
+        - check with databaseManager if it matches current searcrFilter
+        - insert into current cache window IF
+            - matches current searchFilter
+            - identifier is greater than first one OR cache is empty
+              - AND identifier is less than Nth in the list (not necessarily the last one) OR cache is empty
+            - identifier is not yet in the cache
         - find where in list of items it would go
           - may want to cache all current People to make it easier to find where to place it in cache list
+        - drop off last item in the cache
         - do insert() operation to make it visible
     - [ ] Handle cases where we do both update a few items, delete a few items, and insert a few items.
         - do updates first

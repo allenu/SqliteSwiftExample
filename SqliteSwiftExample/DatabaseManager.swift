@@ -65,6 +65,18 @@ class DatabaseManager {
         }
     }
     
+    func searchFilterContains(person: Person) -> Bool {
+        if let searchFilter = searchFilter {
+            if searchFilter.isEmpty {
+                return true
+            } else {
+                return person.name.lowercased().contains(searchFilter.lowercased())
+            }
+        } else {
+            return true
+        }
+    }
+    
     func setupTables() {
         do {
             try connection.run(peopleTable.create { t in
@@ -100,7 +112,7 @@ class DatabaseManager {
             insert(person: person)
             
             // Wait a second
-            usleep(20 * 1000)
+            usleep(80 * 1000)
         }
     }
     
@@ -121,6 +133,12 @@ class DatabaseManager {
         do {
             let rowid = try connection.run(insert)
 //            print("inserted row \(rowid)")
+            
+            // Announce it
+            DispatchQueue.main.async {
+                let insertedIdentifiers: [String] = [ person.identifier ]
+                NotificationCenter.default.post(name: DatabaseManager.dataDidChangeNotification, object: self, userInfo: ["insertedIdentifiers" : insertedIdentifiers])
+            }
         } catch {
             print("Failed to insert person with identifier \(person.identifier) -- may already exist? error: \(error)")
         }
@@ -139,7 +157,7 @@ class DatabaseManager {
             }
             
             if try connection.run(deleteFilter.delete()) > 0 {
-                print("deleted \(name) items")
+                print("deleted items matching \(name)")
                 
                 NotificationCenter.default.post(name: DatabaseManager.dataDidChangeNotification, object: self, userInfo: ["removedIdentifiers" : removedIdentifiers])
 
@@ -214,6 +232,10 @@ class DatabaseManager {
 }
 
 extension DatabaseManager: DatabaseCacheWindowDataSource {
+    func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, searchFilterContains item: Person) -> Bool {
+        return searchFilterContains(person: item)
+    }
+    
     func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, fetch limitCount: Int, itemsBefore identifier: String?) -> [String] {
         // Fetch backwards
         let query: QueryType
