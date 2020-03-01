@@ -11,10 +11,13 @@ import SQLite
 
 class ViewController: NSViewController {
     var databaseManager: DatabaseManager!
-    let itemsPerPage: Int = 20
+    let itemsPerPage: Int = 25
     
     @IBOutlet weak var tableView: NSTableView!
     @IBOutlet weak var searchField: NSSearchField!
+    @IBOutlet weak var deleteLikeTextField: NSTextField!
+    @IBOutlet weak var insertTextField: NSTextField!
+    @IBOutlet weak var updateLikeTextField: NSTextField!
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -27,9 +30,10 @@ class ViewController: NSViewController {
         
         databaseManager.setupTables()
         DispatchQueue.global().async {
-            self.databaseManager.generateRows(numRows: 10000)
+            self.databaseManager.generateRows(numRows: 1000)
         }
-        databaseManager.prefetchCache(cachedWindowSize: itemsPerPage * 2)
+        
+        
 
         tableView.dataSource = self
         tableView.delegate = self
@@ -39,6 +43,28 @@ class ViewController: NSViewController {
         // Need to listen to when user scrolls too far
         self.tableView.enclosingScrollView?.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(didObserveScroll(notification:)), name: NSView.boundsDidChangeNotification, object: self.tableView.enclosingScrollView?.contentView)
+
+        NotificationCenter.default.addObserver(self, selector: #selector(dataDidChange(notification:)), name: DatabaseManager.dataDidChangeNotification, object: databaseManager)
+        
+        // Initial fill
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {
+            let tableOperations = self.databaseManager.setCacheWindow(newOffset: 0, newSize: self.itemsPerPage * 2)
+            self.process(tableOperations: tableOperations)
+        })
+    }
+    
+    @objc func dataDidChange(notification: NSNotification) {
+        let updatedIdentifiers: [String] = (notification.userInfo?["updatedIdentifiers"] as? [String]) ?? []
+        let removedIdentifiers: [String] = (notification.userInfo?["removedIdentifiers"] as? [String]) ?? []
+
+        // TODO: Get this from notification
+        let insertedIdentifiers: [String] = []
+        
+        let tableOperations = databaseManager.updateCacheIfNeeded(updatedIdentifiers: updatedIdentifiers,
+                                                                  insertedIdentifiers: insertedIdentifiers,
+                                                                  removedIdentifiers: removedIdentifiers)
+        
+        process(tableOperations: tableOperations)
     }
     
     @objc func didObserveScroll(notification: NSNotification) {
@@ -57,99 +83,91 @@ class ViewController: NSViewController {
         let lastVisibleRow = visibleRows.location + visibleRows.length
         let firstVisibleRow = visibleRows.location
 //        print("lastVisibleRow is \(lastVisibleRow) - first is \(firstVisibleRow)")
+        print("visible rows: \(firstVisibleRow) to \(lastVisibleRow)")
         
+        
+        let tableOperations = databaseManager.setCacheWindow(newOffset: firstVisibleRow - 10, newSize: itemsPerPage * 2)
+        process(tableOperations: tableOperations)
+
+/*
         // If we scroll the bottom past 75% of our window, then move our window down
         let fetchTriggerDown: Int = databaseManager.effectiveWindowEndIndex() - itemsPerPage / 2
         let fetchTriggerUp: Int = databaseManager.effectiveWindowStartIndex()
+        
+        let newOffset: Int?
+        
         if lastVisibleRow >= fetchTriggerDown || databaseManager.cachedIdentifiers.count == 0 {
-            let shiftResult = databaseManager.shiftCacheWindow(down: itemsPerPage / 2)
-            switch shiftResult.1 {
-            case .none:
-                // Do nothing. We already know about those entries that we're shifting down to show.
-                
-                // HACK: To get around the fact that NSTableView loads data for ALL rows even ones
-                // not visible on-screen, just reload the data for the visible rows.
-                var indexSet = IndexSet()
-                Array(databaseManager.effectiveWindowStartIndex()..<databaseManager.effectiveWindowEndIndex()).forEach { index in
-                    indexSet.insert(index)
-                }
-                self.tableView.beginUpdates()
-                self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0))
-                self.tableView.endUpdates()
-                
-            case .update(let index, let count):
-                var indexSet = IndexSet()
-                Array(index..<(index + count)).forEach { index in
-                    indexSet.insert(index)
-                }
-                if indexSet.count > 0 {
-//                        print("updating rows from \(index) to \(index + count)")
-                    self.tableView.beginUpdates()
-                    self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0))
-                    self.tableView.endUpdates()
-                }
-                
-            case .insert(let index, let count):
-                var indexSet = IndexSet()
-                Array(index..<(index + count)).forEach { index in
-                    indexSet.insert(index)
-                }
-                if indexSet.count > 0 {
-                    self.tableView.beginUpdates()
-                    self.tableView.insertRows(at: indexSet, withAnimation: .slideDown)
-                    self.tableView.endUpdates()
-                }
-                
-            case .remove:
-                assertionFailure("NYI - we detected fewer items than expected at head")
-            }
+            newOffset = max(0, lastVisibleRow - itemsPerPage)
         } else if firstVisibleRow < fetchTriggerUp {
-            let shiftResult = databaseManager.shiftCacheWindow(up: itemsPerPage)
-            switch shiftResult.1 {
-            case .none:
-                // Do nothing. We already know about those entries that we're shifting up to show.
-                // HACK: To get around the fact that NSTableView loads data for ALL rows even ones
-                // not visible on-screen, just reload the data for the visible rows.
-                var indexSet = IndexSet()
-                Array(databaseManager.effectiveWindowStartIndex()..<databaseManager.effectiveWindowEndIndex()).forEach { index in
-                    indexSet.insert(index)
-                }
-                if indexSet.count > 0 {
-                    self.tableView.beginUpdates()
-                    self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0))
-                    self.tableView.endUpdates()
-                }
-                
-            case .update(let index, let count):
-                var indexSet = IndexSet()
-                Array(index..<(index + count)).forEach { index in
-                    indexSet.insert(index)
-                }
-                if indexSet.count > 0 {
-//                        print("updating rows from \(index) to \(index + count)")
-                    self.tableView.beginUpdates()
-                    self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0))
-                    self.tableView.endUpdates()
-                }
-                
-            case .insert(let index, let count):
-                assertionFailure("NYI - we detected inserted items in tail")
+            newOffset = firstVisibleRow - itemsPerPage
+        } else {
+            newOffset = nil
+        }
+        
+        if let newOffset = newOffset {
+            let tableOperations = databaseManager.setCacheWindow(newOffset: newOffset, newSize: itemsPerPage * 2)
+            process(tableOperations: tableOperations)
+        }
+ */
+    }
+    
+    @IBAction func didTapInsert(sender: NSButton) {
+        let name = insertTextField.stringValue
+        databaseManager.insertPerson(name: name)
+    }
 
-            case .remove:
-                assertionFailure("NYI - we detected fewer items in tail")
+    @IBAction func didTapUpdateLike(sender: NSButton) {
+        let name = updateLikeTextField.stringValue
+        databaseManager.updateLike(name: name)
+    }
+    
+    @IBAction func didTapDeleteLike(sender: NSButton) {
+        let name = deleteLikeTextField.stringValue
+        databaseManager.deleteLike(name: name)
+    }
+    
+    func process(tableOperations: [TableOperation]) {
+        if tableOperations.count > 0 {
+            self.tableView.beginUpdates()
+            tableOperations.forEach { operation in
+                switch operation {
+                case .none:
+                    break
+                    
+                case .update(let position, let size):
+                    var indexSet = IndexSet()
+                    Array(position..<(position+size)).forEach { index in
+                        indexSet.insert(index)
+                    }
+                    self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0))
+
+                case .insert(let position, let size):
+                    var indexSet = IndexSet()
+                    Array(position..<(position+size)).forEach { index in
+                        indexSet.insert(index)
+                    }
+                    self.tableView.insertRows(at: indexSet, withAnimation: .slideDown)
+                    
+                case .remove(let position, let size):
+                    var indexSet = IndexSet()
+                    Array(position..<(position+size)).forEach { index in
+                        indexSet.insert(index)
+                    }
+                    self.tableView.removeRows(at: indexSet, withAnimation: .slideUp)
+                    
+                case .reload:
+                    self.tableView.reloadData()
+                }
             }
-            
+            self.tableView.endUpdates()
         }
     }
     
-    @IBAction func addPerson(sender: NSButton) {
-        databaseManager.generateRows(numRows: 1)
-    }
 }
 
 extension ViewController: NSTableViewDataSource {
     public func numberOfRows(in tableView: NSTableView) -> Int {
-        return databaseManager.numFuzzyItems()
+        return databaseManager.numItems()
     }
 }
 
@@ -174,7 +192,7 @@ extension ViewController: NSSearchFieldDelegate {
         
         databaseManager.searchFilter = sender.stringValue
         databaseManager.resetCache()
-        databaseManager.prefetchCache(cachedWindowSize: itemsPerPage * 2)
+        _ = databaseManager.setCacheWindow(newOffset: 0, newSize: itemsPerPage * 2)
         tableView.reloadData()
     }
     
@@ -183,7 +201,7 @@ extension ViewController: NSSearchFieldDelegate {
         
         databaseManager.searchFilter = nil
         databaseManager.resetCache()
-        databaseManager.prefetchCache(cachedWindowSize: itemsPerPage * 2)
+        _ = databaseManager.setCacheWindow(newOffset: 0, newSize: itemsPerPage * 2)
         tableView.reloadData()
     }
     
@@ -191,7 +209,7 @@ extension ViewController: NSSearchFieldDelegate {
         print("search text did change: \(searchField.stringValue)")
         databaseManager.searchFilter = searchField.stringValue
         databaseManager.resetCache()
-        databaseManager.prefetchCache(cachedWindowSize: itemsPerPage * 2)
+        _ =  databaseManager.setCacheWindow(newOffset: 0, newSize: itemsPerPage * 2)
         tableView.reloadData()
     }
 }
