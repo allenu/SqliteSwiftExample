@@ -16,6 +16,17 @@
         - then do inserts
         - then do deletes
 
+    - [x] BUG: It's possible to delete everything but have the wrong total items count in numKnownItems
+        - it appears we aren't accounting for all deleted items
+        - OR we're probably doing our math wrong because windowSize is zero...
+
+    - [x] BUG: Delet all items
+        - next, insert a new item and scroll
+        -> CRASH
+
+    - [ ] BUG: Delete all rows by entering nothing in delete like text field
+        -> ugly debug spew
+
 - [x] Add notifiation when items are updated
 
 - [ ] Write new setCacheWindow(position:, size:)
@@ -23,10 +34,10 @@
         - start with num known items, windowOffset, windowSize AND new requested windowOffset, new requested windowSize AND actual
           new windowSize (based on what we were able to fetch)
         - returns new known items, windowOffset, windowSize and TableOperations
-    - [ ] Move DataWindowCache into its own class and have it delegate to its DataWindowCacheDataSource
-    - [ ] Have TableView use DataWindowCacheDataSource as its DataSource -- or else route it from ViewController to it
+    - [x] Move DataWindowCache into its own class and have it delegate to its DataWindowCacheDataSource
+    - [x] Have TableView use DataWindowCacheDataSource as its DataSource -- or else route it from ViewController to it
 
-- [ ] Add a search filter
+- [x] Add a search filter
     - [x] Add text field that triggers search on each char typed
     - [x] Update DatabaseManager
         - [x] add resetCache() which just sets n_tail = 0, n_window = 0, n_head = 0 and clears cached identifiers
@@ -39,7 +50,7 @@
 
             - will do the math to figure out if there is overlap between the new position and old one and only fetch enough
               to cover new position
-              - [ ] Make it still return the tableView insert/update/remove operations required
+              - [x] Make it still return the tableView insert/update/remove operations required
 
         - [x] Add "searchFilter" text var which is used for the next query
         - [x] add currentQuery: QueryType 
@@ -56,7 +67,7 @@
       When fetch is done, update the window appropriately. If a fetch request occurs while we're still in the middle of
       a fetch, just drop it.
 
-- [ ] Bug: when you add a new person using the "Add Person" button and then scroll the table view, SQLite crashes
+- [x] Bug: when you add a new person using the "Add Person" button and then scroll the table view, SQLite crashes
     - It's probably because the row iterator doesn't like the fact that we inserted a new row. Maybe we need to
       refresh the row iterator somehow but maintain our position in it.
 
@@ -70,14 +81,14 @@
       We could also just re-create the row iterator whenever we fetch. There's no need to only do it when we
       mutate the table.
 
-- [ ] Add a "Delete Person" button
+- [x] Add a "Delete Person" button
 
     - Should delete from table view
     - Should delete from database
 
-- [ ] Sort rows by an arbitrary column: (Age or weight or name?)
+- [x] Sort rows by an arbitrary column: (Age or weight or name?)
     - Handle deletion
     - Handle insert (which could insert anywhere arbitrarily)
 
-- [ ] Switch tableView to be NSView-based instead of cell-based. This way we'll get the benefits of lazy-loading.
+- [x] Switch tableView to be NSView-based instead of cell-based. This way we'll get the benefits of lazy-loading.
 
