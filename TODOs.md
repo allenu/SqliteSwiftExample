@@ -1,5 +1,13 @@
 # TODOs
 
+- [ ] Clean up all the code
+    - [ ] Remove print() statements
+    - [ ] Remove commented code
+    - [ ] Update README to explain what this is
+
+
+- [ ] Make dataSource generic instead of using Person, use <T>
+
 - [ ] Add new tests
     - [x] Something that deletes a random entry
     - [ ] Just get rid of Sqlite and have a simulated Database source
@@ -7,11 +15,15 @@
 - [ ] More update logic
     - [x] if we delete items from the cache window, fetch items towards end to keep it same size
     - [ ] Make setting the searchFilter trigger a notification to reload the database
-    - [ ] Make it so that the tableView allows insert if it's tacking onto the end of the current window *AND* we're "viewing"
+    - [x] Make it so that the tableView allows insert if it's tacking onto the end of the current window *AND* we're "viewing"
           towards the end of the window ... how do we indicate that we are looking at the tail end of the window, though?
-    - [ ] Make UI auto scroll to end if it detects new entries added to window ?
+    - [x] Make UI auto scroll to end if it detects new entries added to window ?
 
     - [ ] Tweak the cache window size against the visible rect for optimum loading of new entries
+
+    - [x] Cache Person objects in DatabaseCacheWindow itself
+        - [x] refresh contents when forced to via updateCacheIfNeeded
+        - [x] remove from cache if detected in removeIdentifiers
 
     - [x] handle insertion updates
         - if we insert items on the fly, have it insert into the cachedWindow if it matches query

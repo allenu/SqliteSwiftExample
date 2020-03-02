@@ -88,6 +88,7 @@ class ViewController: NSViewController {
     
     func process(tableOperations: [TableOperation]) {
         if tableOperations.count > 0 {
+            var shouldScrollToEnd = false
             self.tableView.beginUpdates()
             tableOperations.forEach { operation in
                 switch operation {
@@ -99,7 +100,7 @@ class ViewController: NSViewController {
                     Array(position..<(position+size)).forEach { index in
                         indexSet.insert(index)
                     }
-                    print("process: updating rows at \(position) of size \(size)")
+//                    print("process: updating rows at \(position) of size \(size)")
                     self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0))
 
                 case .insert(let position, let size):
@@ -107,24 +108,32 @@ class ViewController: NSViewController {
                     Array(position..<(position+size)).forEach { index in
                         indexSet.insert(index)
                     }
-                    print("process: inserting rows at \(position) of size \(size)")
+//                    print("process: inserting rows at \(position) of size \(size)")
                     self.tableView.insertRows(at: indexSet, withAnimation: .slideDown)
-                    self.tableView.enclosingScrollView?.flashScrollers()
+                    // Also scroll to end if needed
+                    if databaseCacheWindow.isViewingEnd {
+                        shouldScrollToEnd = true
+                    } else {
+                        self.tableView.enclosingScrollView?.flashScrollers()
+                    }
                     
                 case .remove(let position, let size):
                     var indexSet = IndexSet()
                     Array(position..<(position+size)).forEach { index in
                         indexSet.insert(index)
                     }
-                    print("process: deleting rows at \(position) of size \(size)")
+//                    print("process: deleting rows at \(position) of size \(size)")
                     self.tableView.removeRows(at: indexSet, withAnimation: .slideUp)
                     
                 case .reload:
-                    print("process: reloading all rows")
+//                    print("process: reloading all rows")
                     self.tableView.reloadData()
                 }
             }
             self.tableView.endUpdates()
+            if shouldScrollToEnd {
+                self.tableView.scrollRowToVisible(self.databaseCacheWindow.numItems - 1)
+            }
         } else {
 //            print("no changes to process")
         }
