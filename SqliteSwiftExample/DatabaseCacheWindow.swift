@@ -13,11 +13,6 @@ struct CacheWindowState {
     let windowOffset: Int
     let windowSize: Int
     
-    // This is the desired offset the client requested. We won't actually
-    // honor it with windowOffset since we try to maximize the cache size,
-    // but if new items are appended, we use this to determine if we should
-    // shift the cache forward.
-    let desiredWindowOffset: Int
 }
 
 struct GrowCacheWindowResult {
@@ -35,7 +30,7 @@ enum TableOperation {
 
 // Attempt to grow a cache in reverse by delta items (negative delta value) or forwards (positive delta value).
 // numItemsFetched indicates how many we were actually able to grow in that direction.
-func growCacheWindow(from oldCacheWindowState: CacheWindowState, delta: Int, numItemsFetched: Int, desiredWindowOffset: Int) -> GrowCacheWindowResult {
+func growCacheWindow(from oldCacheWindowState: CacheWindowState, delta: Int, numItemsFetched: Int) -> GrowCacheWindowResult {
     if delta == 0 {
         assertionFailure("Must not call with delta == 0")
     }
@@ -124,7 +119,7 @@ func growCacheWindow(from oldCacheWindowState: CacheWindowState, delta: Int, num
     
     let newWindowSize = oldCacheWindowState.windowSize + numItemsFetched
     let newNumKnownItems  = oldCacheWindowState.numKnownItems - numItemsDeleted + numItemsInserted
-    let newCacheWindowState = CacheWindowState(numKnownItems: newNumKnownItems, windowOffset: newWindowOffset, windowSize: newWindowSize, desiredWindowOffset: desiredWindowOffset)
+    let newCacheWindowState = CacheWindowState(numKnownItems: newNumKnownItems, windowOffset: newWindowOffset, windowSize: newWindowSize)
     
     return GrowCacheWindowResult(cacheWindowState: newCacheWindowState, tableOperations: tableOperations)
 }
@@ -138,18 +133,29 @@ protocol DatabaseCacheWindowDataSource {
 }
 
 class DatabaseCacheWindow {
-    let maxCacheWindowSize = 40
 
     let dataSource: DatabaseCacheWindowDataSource
     var cachedIdentifiers: [String] = []
-    var cacheWindowState = CacheWindowState(numKnownItems: 0, windowOffset: 0, windowSize: 0, desiredWindowOffset: 0)
+    var cacheWindowState = CacheWindowState(numKnownItems: 0, windowOffset: 0, windowSize: 0)
     
-    // We cache a limited number of items so that we don't have to ask the dataSource to fetch
+    // This is the desired offset the client requested. We won't actually
+    // honor it with windowOffset since we try to maximize the cache size,
+    // but if new items are appended, we use this to determine if we should
+    // shift the cache forward.
+    var desiredWindowOffset: Int = 0
+    
+    // How big caller wanted the cache to be. This grows based on the setCacheWindow() requests.
+    var desiredWindowSize = 10
+
+    // We cache a limited number of items in a lookup so that we don't have to ask the dataSource to fetch
     // them from disk/database. This requires that we catch all update events so that we keep
     // these items fresh.
-    let maxCachedItems = 100
-    var cachedItemIdentifiers: [String] = []
-    var cachedItems: [String : Person] = [:]
+    let maxItemsInLookup = 100
+    // This is a list of items that are added to the lookup, sorted in order that they are added or looked up.
+    // Most recently used items show up at the end. If an item is read from the cache, it is pulled to the end
+    // of the list to indicate it was used. Items towards the front are liable to be flushed from the cache.
+    var itemLookupIdentifiers: [String] = []
+    var itemLookup: [String : Person] = [:]
 
     init(dataSource: DatabaseCacheWindowDataSource) {
         self.dataSource = dataSource
@@ -163,7 +169,7 @@ class DatabaseCacheWindow {
         // If our desired offset is greater than what we were able to set, it just
         // means we reached the end of the data. We always maintain full cache size if
         // possible, so this is the only scenario it can happen.
-        return cacheWindowState.desiredWindowOffset > cacheWindowState.windowOffset
+        return desiredWindowOffset > cacheWindowState.windowOffset
     }
     
     func updateCacheIfNeeded(updatedIdentifiers: [String],
@@ -200,8 +206,7 @@ class DatabaseCacheWindow {
             }
             cacheWindowState = CacheWindowState(numKnownItems: cacheWindowState.numKnownItems - deletedIndexes.count,
                                                 windowOffset: cacheWindowState.windowOffset,
-                                                windowSize: cacheWindowState.windowSize - deletedIndexes.count,
-                                                desiredWindowOffset: cacheWindowState.desiredWindowOffset)
+                                                windowSize: cacheWindowState.windowSize - deletedIndexes.count)
             
             let deleteOperations: [TableOperation] = deletedIndexes.reversed().map { deletedIndex in
                 return TableOperation.remove(at: cacheWindowState.windowOffset + deletedIndex, count: 1)
@@ -226,7 +231,7 @@ class DatabaseCacheWindow {
                         // If our desired window offset is actually deeper than the actual window offset,
                         // we are okay with trying to append. This scenario only happens if we are viewing
                         // the end of the cache and it can no longer grow.
-                        let viewingEndOfCache = cacheWindowState.desiredWindowOffset > cacheWindowState.windowOffset
+                        let viewingEndOfCache = desiredWindowOffset > cacheWindowState.windowOffset
 
                         let notAlreadyInCache = !cachedIdentifiers.contains(identifier)
                         let belongsInRange: Bool
@@ -234,7 +239,7 @@ class DatabaseCacheWindow {
                             let lastIdentifier = cachedIdentifiers.last {
                             
                             let greaterThanFirst = identifier > firstIdentifier
-                            let lesserThanLast = identifier < lastIdentifier || cachedIdentifiers.count < maxCacheWindowSize-1
+                            let lesserThanLast = identifier < lastIdentifier || cachedIdentifiers.count < desiredWindowSize-1
                             belongsInRange = greaterThanFirst && (lesserThanLast || viewingEndOfCache)
                         } else {
                             belongsInRange = true
@@ -251,7 +256,7 @@ class DatabaseCacheWindow {
                             
                             // Do not insert if it would go at the end and would cause cache to grow too long.
                             // But do allow it if we are viewing the end of the list.
-                            if insertIndex < maxCacheWindowSize-1 || viewingEndOfCache {
+                            if insertIndex < desiredWindowSize-1 || viewingEndOfCache {
                                 cachedIdentifiers.insert(identifier, at: insertIndex)
                                 let effectiveInsertIndex = cacheWindowState.windowOffset + insertIndex
                                 tmpTableOperations.append(.insert(at: effectiveInsertIndex, count: 1))
@@ -259,7 +264,7 @@ class DatabaseCacheWindow {
                                 // If item gets too large, either shift windowOffset+drop first item (if at end of cache)
                                 // or drop last item.
                                 let windowOffsetShift: Int
-                                if cachedIdentifiers.count == maxCacheWindowSize {
+                                if cachedIdentifiers.count == desiredWindowSize {
                                     if viewingEndOfCache {
                                         windowOffsetShift = 1
                                         cachedIdentifiers.removeFirst()
@@ -273,8 +278,7 @@ class DatabaseCacheWindow {
 
                                 cacheWindowState = CacheWindowState(numKnownItems: cacheWindowState.numKnownItems + 1,
                                                                     windowOffset: cacheWindowState.windowOffset + windowOffsetShift,
-                                                                    windowSize: cachedIdentifiers.count,
-                                                                    desiredWindowOffset: cacheWindowState.desiredWindowOffset)
+                                                                    windowSize: cachedIdentifiers.count)
                             }
                         }
                     }
@@ -290,18 +294,25 @@ class DatabaseCacheWindow {
     }
     
     func item(for identifier: String) -> Person? {
-        if let person = cachedItems[identifier] {
+        if let person = itemLookup[identifier] {
+            // Item was looked up, so move it to the end of the list
+            if let itemIndex = itemLookupIdentifiers.firstIndex(of: identifier) {
+                itemLookupIdentifiers.remove(at: itemIndex)
+                itemLookupIdentifiers.append(identifier)
+            } else {
+                assertionFailure("Item we looked up isn't in the itemLookupIdentifiers")
+            }
             return person
         } else {
             let person = dataSource.databaseCacheWindow(self, itemFor: identifier)
             if let person = person {
-                cachedItems[identifier] = person
+                itemLookup[identifier] = person
                 
-                cachedItemIdentifiers.append(identifier)
-                if cachedItemIdentifiers.count > maxCachedItems {
+                itemLookupIdentifiers.append(identifier)
+                if itemLookupIdentifiers.count > maxItemsInLookup {
                     // Drop first item so we keep cache small
-                    let firstCachedItemIdentifier = cachedItemIdentifiers.removeFirst()
-                    cachedItems.removeValue(forKey: firstCachedItemIdentifier)
+                    let firstCachedItemIdentifier = itemLookupIdentifiers.removeFirst()
+                    itemLookup.removeValue(forKey: firstCachedItemIdentifier)
                 }
             }
             return person
@@ -309,28 +320,30 @@ class DatabaseCacheWindow {
     }
     
     func removeCachedItem(for identifier: String) {
-        if let firstMatchingIndex = cachedItemIdentifiers.firstIndex(where: { $0 == identifier }) {
-            cachedItemIdentifiers.remove(at: firstMatchingIndex)
+        if let firstMatchingIndex = itemLookupIdentifiers.firstIndex(where: { $0 == identifier }) {
+            itemLookupIdentifiers.remove(at: firstMatchingIndex)
         }
-        cachedItems.removeValue(forKey: identifier)
+        itemLookup.removeValue(forKey: identifier)
     }
     
-    func resetCache() {
-        cacheWindowState = CacheWindowState(numKnownItems: 0, windowOffset: 0, windowSize: 0, desiredWindowOffset: cacheWindowState.desiredWindowOffset)
+    func clear() {
+        cacheWindowState = CacheWindowState(numKnownItems: 0, windowOffset: 0, windowSize: 0)
+        desiredWindowOffset = 0
         cachedIdentifiers = []
+        
+        _ = setCacheWindow(newOffset: desiredWindowOffset, newSize: desiredWindowSize)
     }
     
     func setCacheWindow(newOffset: Int, newSize: Int) -> [TableOperation] {
         
-        let newSize = min(maxCacheWindowSize, newSize)
-//        assert(newSize < maxCacheWindowSize)
+        // Allow cache to grow to largest requested window size based on request
+        desiredWindowSize = max(desiredWindowSize, newSize)
+        desiredWindowOffset = newOffset
         
         let oldCacheWindowEnd = cacheWindowState.windowOffset + cacheWindowState.windowSize
         let newCacheWindowEnd = newOffset + newSize
         
         let hasNoCacheData = cacheWindowState.windowSize == 0
-        
-//        print("newOffset: \(newOffset) of size \(newSize) -- old: \(cacheWindowState.windowOffset) size \(cacheWindowState.windowSize)")
         
         if newOffset < cacheWindowState.windowOffset && ((newCacheWindowEnd > cacheWindowState.windowOffset && newCacheWindowEnd < oldCacheWindowEnd) || cacheWindowState.windowSize == 0) {
             // Window moved backwards but overlaps old window
@@ -344,16 +357,16 @@ class DatabaseCacheWindow {
             let numItemsFetched = prependedIdentifiers.count
             
             let delta = newOffset - cacheWindowState.windowOffset
-            let result = growCacheWindow(from: cacheWindowState, delta: delta, numItemsFetched: numItemsFetched, desiredWindowOffset: newOffset)
+            let result = growCacheWindow(from: cacheWindowState, delta: delta, numItemsFetched: numItemsFetched)
             
             cachedIdentifiers.insert(contentsOf: prependedIdentifiers, at: 0)
             cacheWindowState = result.cacheWindowState
             
-            let numCacheItemsOverLimit = cachedIdentifiers.count - maxCacheWindowSize
+            let numCacheItemsOverLimit = cachedIdentifiers.count - desiredWindowSize
             if numCacheItemsOverLimit > 0 {
                 // Remove last items if our cache gets too large
                 _ = cachedIdentifiers.removeLast(numCacheItemsOverLimit)
-                cacheWindowState = CacheWindowState(numKnownItems: cacheWindowState.numKnownItems, windowOffset: cacheWindowState.windowOffset, windowSize: cachedIdentifiers.count, desiredWindowOffset: newOffset)
+                cacheWindowState = CacheWindowState(numKnownItems: cacheWindowState.numKnownItems, windowOffset: cacheWindowState.windowOffset, windowSize: cachedIdentifiers.count)
             }
 
             return result.tableOperations
@@ -372,15 +385,15 @@ class DatabaseCacheWindow {
                 let numItemsFetched = appendedIdentifiers.count
                 
                 let delta = newCacheWindowEnd - oldCacheWindowEnd
-                let result = growCacheWindow(from: cacheWindowState, delta: delta, numItemsFetched: numItemsFetched, desiredWindowOffset: newOffset)
+                let result = growCacheWindow(from: cacheWindowState, delta: delta, numItemsFetched: numItemsFetched)
                 
                 cachedIdentifiers.append(contentsOf: appendedIdentifiers)
                 cacheWindowState = result.cacheWindowState
-                let numCacheItemsOverLimit = cachedIdentifiers.count - maxCacheWindowSize
+                let numCacheItemsOverLimit = cachedIdentifiers.count - desiredWindowSize
                 if numCacheItemsOverLimit > 0 {
                     // Remove first items if our cache gets too large
                     _ = cachedIdentifiers.removeFirst(numCacheItemsOverLimit)
-                    cacheWindowState = CacheWindowState(numKnownItems: cacheWindowState.numKnownItems, windowOffset: cacheWindowState.windowOffset + numCacheItemsOverLimit, windowSize: cachedIdentifiers.count, desiredWindowOffset: newOffset)
+                    cacheWindowState = CacheWindowState(numKnownItems: cacheWindowState.numKnownItems, windowOffset: cacheWindowState.windowOffset + numCacheItemsOverLimit, windowSize: cachedIdentifiers.count)
                 }
                 
                 return result.tableOperations
@@ -403,7 +416,7 @@ class DatabaseCacheWindow {
             cachedIdentifiers = newIdentifiers
             
             if numItemsFetched == 0 {
-                // Uh oh -- NYI
+                // TODO: Uh oh -- NYI
                 return []
             } else {
                 let numItemsExpected = min(cacheWindowState.numKnownItems - adjustedNewOffset, newSize)
@@ -420,7 +433,7 @@ class DatabaseCacheWindow {
                         .remove(at: adjustedNewOffset + numItemsFetched, count: numItemsDeleted)
                     ]
                     
-                    cacheWindowState = CacheWindowState(numKnownItems: numKnownItems, windowOffset: adjustedNewOffset, windowSize: numItemsFetched, desiredWindowOffset: newOffset)
+                    cacheWindowState = CacheWindowState(numKnownItems: numKnownItems, windowOffset: adjustedNewOffset, windowSize: numItemsFetched)
                     return operations
                 } else if numItemsFetched > numItemsExpected {
                     // Got more than expected
@@ -433,7 +446,7 @@ class DatabaseCacheWindow {
                         .insert(at: adjustedNewOffset + numItemsExpected, count: numItemsInserted)
                     ]
                     
-                    cacheWindowState = CacheWindowState(numKnownItems: numKnownItems, windowOffset: adjustedNewOffset, windowSize: numItemsFetched, desiredWindowOffset: newOffset)
+                    cacheWindowState = CacheWindowState(numKnownItems: numKnownItems, windowOffset: adjustedNewOffset, windowSize: numItemsFetched)
                     return operations
 
                 } else {
@@ -447,7 +460,7 @@ class DatabaseCacheWindow {
                             .update(at: adjustedNewOffset, count: numItemsFetched)
                         ]
                         
-                        cacheWindowState = CacheWindowState(numKnownItems: cacheWindowState.numKnownItems, windowOffset: adjustedNewOffset, windowSize: numItemsFetched, desiredWindowOffset: newOffset)
+                        cacheWindowState = CacheWindowState(numKnownItems: cacheWindowState.numKnownItems, windowOffset: adjustedNewOffset, windowSize: numItemsFetched)
                         return operations
                     } else {
                         // Nothing fetched

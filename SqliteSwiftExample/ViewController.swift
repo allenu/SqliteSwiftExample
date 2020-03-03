@@ -45,12 +45,8 @@ class ViewController: NSViewController {
         NotificationCenter.default.addObserver(self, selector: #selector(didObserveScroll(notification:)), name: NSView.boundsDidChangeNotification, object: self.tableView.enclosingScrollView?.contentView)
 
         NotificationCenter.default.addObserver(self, selector: #selector(dataDidChange(notification:)), name: DatabaseManager.dataDidChangeNotification, object: databaseManager)
-        
-        // Initial fill
-//        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: {
-//            let tableOperations = self.databaseCacheWindow.setCacheWindow(newOffset: 0, newSize: self.itemsPerPage * 2)
-//            self.process(tableOperations: tableOperations)
-//        })
+
+        NotificationCenter.default.addObserver(self, selector: #selector(dataDidReload(notification:)), name: DatabaseManager.dataDidReloadNotification, object: databaseManager)
     }
     
     @objc func dataDidChange(notification: NSNotification) {
@@ -63,6 +59,11 @@ class ViewController: NSViewController {
                                                                   removedIdentifiers: removedIdentifiers)
         
         process(tableOperations: tableOperations)
+    }
+    
+    @objc func dataDidReload(notification: NSNotification) {
+        databaseCacheWindow.clear()
+        tableView.reloadData()
     }
     
     @objc func didObserveScroll(notification: NSNotification) {
@@ -165,22 +166,13 @@ extension ViewController: NSTableViewDelegate {
 extension ViewController: NSSearchFieldDelegate {
     func searchFieldDidStartSearching(_ sender: NSSearchField) {
         databaseManager.searchFilter = sender.stringValue
-        databaseCacheWindow.resetCache()
-        _ = databaseCacheWindow.setCacheWindow(newOffset: 0, newSize: itemsPerPage * 2)
-        tableView.reloadData()
     }
     
     func searchFieldDidEndSearching(_ sender: NSSearchField) {
         databaseManager.searchFilter = nil
-        databaseCacheWindow.resetCache()
-        _ = databaseCacheWindow.setCacheWindow(newOffset: 0, newSize: itemsPerPage * 2)
-        tableView.reloadData()
     }
     
     func controlTextDidChange(_ obj: Notification) {
         databaseManager.searchFilter = searchField.stringValue
-        databaseCacheWindow.resetCache()
-        _ =  databaseCacheWindow.setCacheWindow(newOffset: 0, newSize: itemsPerPage * 2)
-        tableView.reloadData()
     }
 }

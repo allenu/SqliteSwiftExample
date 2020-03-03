@@ -23,6 +23,7 @@ struct Person {
 
 class DatabaseManager {
     static let dataDidChangeNotification = NSNotification.Name("DatabaseManagerDataDidChange")
+    static let dataDidReloadNotification = NSNotification.Name("DatabaseManagerDataDidReload")
     
     let fileUrl: URL
     
@@ -45,7 +46,13 @@ class DatabaseManager {
         }
     }
     
-    var searchFilter: String?
+    var searchFilter: String? {
+        didSet {
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: DatabaseManager.dataDidReloadNotification, object: self)
+            }
+        }
+    }
 
     init?(fileUrl: URL) {
         self.fileUrl = fileUrl

@@ -5,8 +5,15 @@
     - [ ] Remove commented code
     - [ ] Update README to explain what this is
 
-
 - [ ] Make dataSource generic instead of using Person, use <T>
+
+- [x] Get rid of maxCacheWindowSize and just keep track of the largest window size encountered
+      and when shifting window around try to maintain it
+
+- [ ] Handle case where we load items arbitrarily at an offset but it returns NOTHING
+    - if it's before our current position... collapse ?
+    - if it's after our current position... collapse and try re-fetching?
+    - best solution might be to just reset?
 
 - [ ] Add new tests
     - [x] Something that deletes a random entry
@@ -20,6 +27,9 @@
     - [x] Make UI auto scroll to end if it detects new entries added to window ?
 
     - [ ] Tweak the cache window size against the visible rect for optimum loading of new entries
+        - [ ] Consider if we even need a "max cache size"
+            - why not just cache enough to cover the current window requested by setCacheWindow
+            - or just enough to cover it and maybe alpha * N on either side, where alpha is some percentage, like 20%
 
     - [x] Cache Person objects in DatabaseCacheWindow itself
         - [x] refresh contents when forced to via updateCacheIfNeeded
