@@ -11,7 +11,7 @@ import SQLite
 
 class ViewController: NSViewController {
     var databaseManager: DatabaseManager!
-    var databaseCacheWindow: DatabaseCacheWindow!
+    var databaseCacheWindow: DatabaseCacheWindow<DatabaseManager>!
     let itemsPerPage: Int = 30
     
     @IBOutlet weak var tableView: NSTableView!
@@ -28,7 +28,7 @@ class ViewController: NSViewController {
         let tempUrl = NSURL.fileURL(withPath: directory)
         let dbUrl = tempUrl.appendingPathComponent("\(subpath)-db.sqlite3")
         databaseManager = DatabaseManager(fileUrl: dbUrl)
-        databaseCacheWindow = DatabaseCacheWindow(dataSource: databaseManager)
+        databaseCacheWindow = DatabaseCacheWindow(provider: databaseManager)
         
         databaseManager.setupTables()
         DispatchQueue.global().async {

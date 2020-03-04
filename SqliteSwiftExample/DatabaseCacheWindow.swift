@@ -124,17 +124,20 @@ func growCacheWindow(from oldCacheWindowState: CacheWindowState, delta: Int, num
     return GrowCacheWindowResult(cacheWindowState: newCacheWindowState, tableOperations: tableOperations)
 }
 
-protocol DatabaseCacheWindowDataSource {
-    func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, searchFilterContains item: Person) -> Bool
-    func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, itemFor identifier: String) -> Person?
-    func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, fetch limitCount: Int, itemsBefore identifier: String?) -> [String]
-    func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, fetch limitCount: Int, itemsAfter identifier: String?) -> [String]
-    func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, fetch limitCount: Int, itemsStartingAt offset: Int) -> [String]
+protocol DatabaseCacheWindowItemProvider {
+    associatedtype ItemType
+    typealias IdentifierType = String
+    
+    func queryContains(item: ItemType) -> Bool
+    func item(for identifier: IdentifierType) -> ItemType?
+    func itemsBefore(identifier: IdentifierType?, limit: Int) -> [IdentifierType]
+    func itemsAfter(identifier: IdentifierType?, limit: Int) -> [IdentifierType]
+    func items(at index: Int, limit: Int) -> [IdentifierType]
 }
 
-class DatabaseCacheWindow {
-
-    let dataSource: DatabaseCacheWindowDataSource
+class DatabaseCacheWindow<ItemProviderType: DatabaseCacheWindowItemProvider> {
+    let provider: ItemProviderType
+    
     var cachedIdentifiers: [String] = []
     var cacheWindowState = CacheWindowState(numKnownItems: 0, windowOffset: 0, windowSize: 0)
     
@@ -147,7 +150,7 @@ class DatabaseCacheWindow {
     // How big caller wanted the cache to be. This grows based on the setCacheWindow() requests.
     var desiredWindowSize = 10
 
-    // We cache a limited number of items in a lookup so that we don't have to ask the dataSource to fetch
+    // We cache a limited number of items in a lookup so that we don't have to ask the provider to fetch
     // them from disk/database. This requires that we catch all update events so that we keep
     // these items fresh.
     let maxItemsInLookup = 100
@@ -155,10 +158,10 @@ class DatabaseCacheWindow {
     // Most recently used items show up at the end. If an item is read from the cache, it is pulled to the end
     // of the list to indicate it was used. Items towards the front are liable to be flushed from the cache.
     var itemLookupIdentifiers: [String] = []
-    var itemLookup: [String : Person] = [:]
+    var itemLookup: [String : ItemProviderType.ItemType] = [:]
 
-    init(dataSource: DatabaseCacheWindowDataSource) {
-        self.dataSource = dataSource
+    init(provider: ItemProviderType) {
+        self.provider = provider
     }
     
     var numItems: Int {
@@ -225,8 +228,8 @@ class DatabaseCacheWindow {
             var tmpTableOperations: [TableOperation] = []
             
             insertedIdentifiers.forEach { identifier in
-                if let person = item(for: identifier) {
-                    if dataSource.databaseCacheWindow(self, searchFilterContains: person) {
+                if let item = item(for: identifier) {
+                    if provider.queryContains(item: item) {
                         
                         // If our desired window offset is actually deeper than the actual window offset,
                         // we are okay with trying to append. This scenario only happens if we are viewing
@@ -293,8 +296,8 @@ class DatabaseCacheWindow {
         return tableOperations
     }
     
-    func item(for identifier: String) -> Person? {
-        if let person = itemLookup[identifier] {
+    func item(for identifier: String) -> ItemProviderType.ItemType? {
+        if let item = itemLookup[identifier] {
             // Item was looked up, so move it to the end of the list
             if let itemIndex = itemLookupIdentifiers.firstIndex(of: identifier) {
                 itemLookupIdentifiers.remove(at: itemIndex)
@@ -302,11 +305,11 @@ class DatabaseCacheWindow {
             } else {
                 assertionFailure("Item we looked up isn't in the itemLookupIdentifiers")
             }
-            return person
+            return item
         } else {
-            let person = dataSource.databaseCacheWindow(self, itemFor: identifier)
-            if let person = person {
-                itemLookup[identifier] = person
+            let item = provider.item(for: identifier)
+            if let item = item {
+                itemLookup[identifier] = item
                 
                 itemLookupIdentifiers.append(identifier)
                 if itemLookupIdentifiers.count > maxItemsInLookup {
@@ -315,7 +318,7 @@ class DatabaseCacheWindow {
                     itemLookup.removeValue(forKey: firstCachedItemIdentifier)
                 }
             }
-            return person
+            return item
         }
     }
     
@@ -326,6 +329,7 @@ class DatabaseCacheWindow {
         itemLookup.removeValue(forKey: identifier)
     }
     
+    // Clear the cache window -- note this does not clear the item lookup
     func clear() {
         cacheWindowState = CacheWindowState(numKnownItems: 0, windowOffset: 0, windowSize: 0)
         desiredWindowOffset = 0
@@ -353,7 +357,7 @@ class DatabaseCacheWindow {
             let numItemsToFetch = cacheWindowState.windowOffset - newOffset
             
             let firstItemIdentifier = cachedIdentifiers.first
-            let prependedIdentifiers = dataSource.databaseCacheWindow(self, fetch: numItemsToFetch, itemsBefore: firstItemIdentifier)
+            let prependedIdentifiers = provider.itemsBefore(identifier: firstItemIdentifier, limit: numItemsToFetch)
             let numItemsFetched = prependedIdentifiers.count
             
             let delta = newOffset - cacheWindowState.windowOffset
@@ -381,7 +385,7 @@ class DatabaseCacheWindow {
             if numItemsToFetch > 0 {
                 // Try to fetch numItemsToFetch rows beyond the last item
                 let lastItemIdentifier = cachedIdentifiers.last
-                let appendedIdentifiers = dataSource.databaseCacheWindow(self, fetch: numItemsToFetch, itemsAfter: lastItemIdentifier)
+                let appendedIdentifiers = provider.itemsAfter(identifier: lastItemIdentifier, limit: numItemsToFetch)
                 let numItemsFetched = appendedIdentifiers.count
                 
                 let delta = newCacheWindowEnd - oldCacheWindowEnd
@@ -410,22 +414,24 @@ class DatabaseCacheWindow {
             // Ensure we don't go below zero for these cases
             let adjustedNewOffset = max(0, newOffset)
             
-            let newIdentifiers = dataSource.databaseCacheWindow(self, fetch: newSize, itemsStartingAt: adjustedNewOffset)
+            let newIdentifiers = provider.items(at: adjustedNewOffset, limit: newSize)
             let numItemsFetched = newIdentifiers.count
             
             cachedIdentifiers = newIdentifiers
             
             if numItemsFetched == 0 {
-                // TODO: Uh oh -- NYI
-                return []
+                // We tried fetching at an arbitrary location and got nothing, when we expected at least
+                // something... The safest thing to do now is just to force a reload of the table.
+                
+                // Clear the cache so we're starting the cache from scratch
+                clear()
+                
+                return [ .reload ]
             } else {
                 let numItemsExpected = min(cacheWindowState.numKnownItems - adjustedNewOffset, newSize)
                 let numKnownItems: Int
                 if numItemsFetched < numItemsExpected {
                     // Got fewer than expected, so do delete
-                    
-//                    print("Got fewer than expected, so do delete")
-                    
                     numKnownItems = adjustedNewOffset + numItemsFetched
                     let numItemsDeleted = numItemsExpected - numItemsFetched
                     
@@ -437,8 +443,6 @@ class DatabaseCacheWindow {
                     return operations
                 } else if numItemsFetched > numItemsExpected {
                     // Got more than expected
-//                    print("Got more than expected")
-                    
                     numKnownItems = adjustedNewOffset + numItemsFetched
                     let numItemsInserted = numItemsFetched - numItemsExpected
                     
@@ -451,8 +455,6 @@ class DatabaseCacheWindow {
 
                 } else {
                     // Got everything we expected
-//                    print("Got everything we expected: adjustedNewOffset: \(adjustedNewOffset) numItemsFetched \(numItemsFetched)")
-                    
                     assert(adjustedNewOffset >= 0)
                     
                     if numItemsFetched > 0 {
@@ -471,7 +473,7 @@ class DatabaseCacheWindow {
         }
     }
     
-    func item(at effectiveRow: Int) -> Person? {
+    func item(at effectiveRow: Int) -> ItemProviderType.ItemType? {
         let cacheIndex = effectiveRow - cacheWindowState.windowOffset
         if cacheIndex < 0 {
             return nil

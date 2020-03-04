@@ -103,19 +103,19 @@ class DatabaseManager {
             let uuid = String(format: "%05d", nextRowIndex)
             nextRowIndex = nextRowIndex + 1
             let names = [
-                "John Paul",
-                "Paul",
-                "George Smith",
-                "Ringo",
                 "Alice",
-                "Rina"
+                "Bob",
+                "Carol",
+                "Dan",
+                "Eve",
+                "Frank"
             ]
-            let name = names[ (Int(arc4random()) % names.count) ]
+            let firstName = names[ (Int(arc4random()) % names.count) ]
+            let lastName = names[ (Int(arc4random()) % names.count) ]
             let weight = 100 + Int64(arc4random() % 50)
             let age = 10 + Int64(arc4random() % 40)
             
-            let person = Person(identifier: uuid, name: "\(nextRowIndex) - \(name)", weight: weight, age: age)
-//            print("Creating person: \(person)")
+            let person = Person(identifier: uuid, name: "\(nextRowIndex) - \(firstName) \(lastName)", weight: weight, age: age)
             insert(person: person)
             
             // Wait a second
@@ -235,22 +235,26 @@ class DatabaseManager {
         // Post the notification
         NotificationCenter.default.post(name: DatabaseManager.dataDidChangeNotification, object: self, userInfo: ["updatedIdentifiers" : updatedIdentifiers])
     }
-        
 }
 
-extension DatabaseManager: DatabaseCacheWindowDataSource {
-    func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, searchFilterContains item: Person) -> Bool {
+extension DatabaseManager: DatabaseCacheWindowItemProvider {
+    typealias ItemType = Person
+    
+    func queryContains(item: ItemType) -> Bool {
         return searchFilterContains(person: item)
     }
     
-    func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, fetch limitCount: Int, itemsBefore identifier: String?) -> [String] {
-        // Fetch backwards
+    func item(for identifier: IdentifierType) -> ItemType? {
+        return person(for: identifier)
+    }
+    
+    func itemsBefore(identifier: IdentifierType?, limit: Int) -> [IdentifierType] {
         let query: QueryType
         
         if let identifier = identifier {
-            query = currentQuery.filter(idColumn < identifier).order(idColumn.desc).limit(limitCount)
+            query = currentQuery.filter(idColumn < identifier).order(idColumn.desc).limit(limit)
         } else {
-            query = currentQuery.order(idColumn.desc).limit(limitCount)
+            query = currentQuery.order(idColumn.desc).limit(limit)
         }
         var prependedIdentifiers: [String] = []
         do {
@@ -265,14 +269,14 @@ extension DatabaseManager: DatabaseCacheWindowDataSource {
         return prependedIdentifiers
     }
     
-    func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, fetch limitCount: Int, itemsAfter identifier: String?) -> [String] {
+    func itemsAfter(identifier: IdentifierType?, limit: Int) -> [IdentifierType] {
         let query: QueryType
         
         if let identifier = identifier {
-            query = currentQuery.filter(idColumn > identifier).limit(limitCount)
+            query = currentQuery.filter(idColumn > identifier).limit(limit)
         } else {
             // We don't have any entries at all yet... so just search for ALL items
-            query = currentQuery.limit(limitCount)
+            query = currentQuery.limit(limit)
         }
 
         var appendedIdentifiers: [String] = []
@@ -287,9 +291,9 @@ extension DatabaseManager: DatabaseCacheWindowDataSource {
         return appendedIdentifiers
     }
     
-    func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, fetch limitCount: Int, itemsStartingAt offset: Int) -> [String] {
+    func items(at index: Int, limit: Int) -> [IdentifierType] {
         // Try to fetch items there
-        let query = currentQuery.limit(limitCount, offset: offset)
+        let query = currentQuery.limit(limit, offset: index)
         var newIdentifiers: [String] = []
         do {
             let result = try connection.prepare(query)
@@ -300,9 +304,5 @@ extension DatabaseManager: DatabaseCacheWindowDataSource {
             print("Error loading person row")
         }
         return newIdentifiers
-    }
-    
-    func databaseCacheWindow(_ databaseCacheWindow: DatabaseCacheWindow, itemFor identifier: String) -> Person? {
-        return person(for: identifier)
     }
 }

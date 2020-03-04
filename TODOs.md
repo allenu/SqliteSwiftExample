@@ -5,29 +5,42 @@
     - [ ] Remove commented code
     - [ ] Update README to explain what this is
 
-- [ ] Make dataSource generic instead of using Person, use <T>
+- [ ] Handle cases where we do both update a few items, delete a few items, and insert a few items.
+    - do updates first
+    - then do inserts
+    - then do deletes
+
+    - [ ] Write test where multiple operations occur:
+        - Insert entries
+        - Update entries
+        - Delete some
+
+- [ ] BUG: Delete all rows by entering nothing in delete like text field
+    -> ugly debug spew
+
+- [x] Make dataSource generic instead of using Person, use <T>
 
 - [x] Get rid of maxCacheWindowSize and just keep track of the largest window size encountered
       and when shifting window around try to maintain it
 
-- [ ] Handle case where we load items arbitrarily at an offset but it returns NOTHING
+- [x] Handle case where we load items arbitrarily at an offset but it returns NOTHING
     - if it's before our current position... collapse ?
     - if it's after our current position... collapse and try re-fetching?
     - best solution might be to just reset?
 
-- [ ] Add new tests
+- [x] Add new tests
     - [x] Something that deletes a random entry
-    - [ ] Just get rid of Sqlite and have a simulated Database source
+    - [x] Just get rid of Sqlite and have a simulated Database source
 
-- [ ] More update logic
+- [x] More update logic
     - [x] if we delete items from the cache window, fetch items towards end to keep it same size
-    - [ ] Make setting the searchFilter trigger a notification to reload the database
+    - [x] Make setting the searchFilter trigger a notification to reload the database
     - [x] Make it so that the tableView allows insert if it's tacking onto the end of the current window *AND* we're "viewing"
           towards the end of the window ... how do we indicate that we are looking at the tail end of the window, though?
     - [x] Make UI auto scroll to end if it detects new entries added to window ?
 
-    - [ ] Tweak the cache window size against the visible rect for optimum loading of new entries
-        - [ ] Consider if we even need a "max cache size"
+    - [x] Tweak the cache window size against the visible rect for optimum loading of new entries
+        - [x] Consider if we even need a "max cache size"
             - why not just cache enough to cover the current window requested by setCacheWindow
             - or just enough to cover it and maybe alpha * N on either side, where alpha is some percentage, like 20%
 
@@ -47,10 +60,6 @@
           - may want to cache all current People to make it easier to find where to place it in cache list
         - drop off last item in the cache
         - do insert() operation to make it visible
-    - [ ] Handle cases where we do both update a few items, delete a few items, and insert a few items.
-        - do updates first
-        - then do inserts
-        - then do deletes
 
     - [x] BUG: It's possible to delete everything but have the wrong total items count in numKnownItems
         - it appears we aren't accounting for all deleted items
@@ -60,8 +69,6 @@
         - next, insert a new item and scroll
         -> CRASH
 
-    - [ ] BUG: Delete all rows by entering nothing in delete like text field
-        -> ugly debug spew
 
 - [x] Add notifiation when items are updated
 
