@@ -12,7 +12,6 @@ import SQLite
 class ViewController: NSViewController {
     var databaseManager: DatabaseManager!
     var databaseCacheWindow: DatabaseCacheWindow<DatabaseManager>!
-    let itemsPerPage: Int = 30
     
     @IBOutlet weak var tableView: NSTableView!
     @IBOutlet weak var searchField: NSSearchField!
@@ -54,9 +53,9 @@ class ViewController: NSViewController {
         let removedIdentifiers: [String] = (notification.userInfo?["removedIdentifiers"] as? [String]) ?? []
         let insertedIdentifiers: [String] = (notification.userInfo?["insertedIdentifiers"] as? [String]) ?? []
         
-        let tableOperations = databaseCacheWindow.updateCacheIfNeeded(updatedIdentifiers: updatedIdentifiers,
-                                                                  insertedIdentifiers: insertedIdentifiers,
-                                                                  removedIdentifiers: removedIdentifiers)
+        let tableOperations = databaseCacheWindow.updateIfNeeded(updatedIdentifiers: updatedIdentifiers,
+                                                                 insertedIdentifiers: insertedIdentifiers,
+                                                                 removedIdentifiers: removedIdentifiers)
         
         process(tableOperations: tableOperations)
     }
@@ -68,7 +67,7 @@ class ViewController: NSViewController {
     
     @objc func didObserveScroll(notification: NSNotification) {
         let visibleRows = tableView.rows(in: tableView.visibleRect)
-        let tableOperations = databaseCacheWindow.setCacheWindow(newOffset: visibleRows.location - 10, newSize: itemsPerPage * 2)
+        let tableOperations = databaseCacheWindow.setCacheWindow(newOffset: visibleRows.location - 5, newSize: visibleRows.length + 10)
         process(tableOperations: tableOperations)
     }
     
@@ -101,7 +100,6 @@ class ViewController: NSViewController {
                     Array(position..<(position+size)).forEach { index in
                         indexSet.insert(index)
                     }
-//                    print("process: updating rows at \(position) of size \(size)")
                     self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0))
 
                 case .insert(let position, let size):
@@ -109,7 +107,6 @@ class ViewController: NSViewController {
                     Array(position..<(position+size)).forEach { index in
                         indexSet.insert(index)
                     }
-//                    print("process: inserting rows at \(position) of size \(size)")
                     self.tableView.insertRows(at: indexSet, withAnimation: .slideDown)
                     // Also scroll to end if needed
                     if databaseCacheWindow.isViewingEnd {
@@ -123,11 +120,9 @@ class ViewController: NSViewController {
                     Array(position..<(position+size)).forEach { index in
                         indexSet.insert(index)
                     }
-//                    print("process: deleting rows at \(position) of size \(size)")
                     self.tableView.removeRows(at: indexSet, withAnimation: .slideUp)
                     
                 case .reload:
-//                    print("process: reloading all rows")
                     self.tableView.reloadData()
                 }
             }

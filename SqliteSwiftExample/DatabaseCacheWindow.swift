@@ -12,7 +12,6 @@ struct CacheWindowState {
     let numKnownItems: Int
     let windowOffset: Int
     let windowSize: Int
-    
 }
 
 struct GrowCacheWindowResult {
@@ -136,29 +135,29 @@ protocol DatabaseCacheWindowItemProvider {
 }
 
 class DatabaseCacheWindow<ItemProviderType: DatabaseCacheWindowItemProvider> {
-    let provider: ItemProviderType
+    private let provider: ItemProviderType
     
-    var cachedIdentifiers: [String] = []
-    var cacheWindowState = CacheWindowState(numKnownItems: 0, windowOffset: 0, windowSize: 0)
+    private var cachedIdentifiers: [String] = []
+    private var cacheWindowState = CacheWindowState(numKnownItems: 0, windowOffset: 0, windowSize: 0)
     
     // This is the desired offset the client requested. We won't actually
     // honor it with windowOffset since we try to maximize the cache size,
     // but if new items are appended, we use this to determine if we should
     // shift the cache forward.
-    var desiredWindowOffset: Int = 0
+    private var desiredWindowOffset: Int = 0
     
     // How big caller wanted the cache to be. This grows based on the setCacheWindow() requests.
-    var desiredWindowSize = 10
+    private var desiredWindowSize = 10
 
     // We cache a limited number of items in a lookup so that we don't have to ask the provider to fetch
     // them from disk/database. This requires that we catch all update events so that we keep
     // these items fresh.
-    let maxItemsInLookup = 100
+    private let maxItemsInLookup = 100
     // This is a list of items that are added to the lookup, sorted in order that they are added or looked up.
     // Most recently used items show up at the end. If an item is read from the cache, it is pulled to the end
     // of the list to indicate it was used. Items towards the front are liable to be flushed from the cache.
-    var itemLookupIdentifiers: [String] = []
-    var itemLookup: [String : ItemProviderType.ItemType] = [:]
+    private var itemLookupIdentifiers: [String] = []
+    private var itemLookup: [String : ItemProviderType.ItemType] = [:]
 
     init(provider: ItemProviderType) {
         self.provider = provider
@@ -175,9 +174,9 @@ class DatabaseCacheWindow<ItemProviderType: DatabaseCacheWindowItemProvider> {
         return desiredWindowOffset > cacheWindowState.windowOffset
     }
     
-    func updateCacheIfNeeded(updatedIdentifiers: [String],
-                             insertedIdentifiers: [String],
-                             removedIdentifiers: [String]) -> [TableOperation] {
+    func updateIfNeeded(updatedIdentifiers: [String],
+                        insertedIdentifiers: [String],
+                        removedIdentifiers: [String]) -> [TableOperation] {
         
         updatedIdentifiers.forEach { updatedIdentifier in
             // Remove updated item from cache to force new value to be fetched
@@ -322,7 +321,7 @@ class DatabaseCacheWindow<ItemProviderType: DatabaseCacheWindowItemProvider> {
         }
     }
     
-    func removeCachedItem(for identifier: String) {
+    private func removeCachedItem(for identifier: String) {
         if let firstMatchingIndex = itemLookupIdentifiers.firstIndex(where: { $0 == identifier }) {
             itemLookupIdentifiers.remove(at: firstMatchingIndex)
         }
@@ -339,7 +338,6 @@ class DatabaseCacheWindow<ItemProviderType: DatabaseCacheWindowItemProvider> {
     }
     
     func setCacheWindow(newOffset: Int, newSize: Int) -> [TableOperation] {
-        
         // Allow cache to grow to largest requested window size based on request
         desiredWindowSize = max(desiredWindowSize, newSize)
         desiredWindowOffset = newOffset
