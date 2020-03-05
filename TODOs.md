@@ -1,9 +1,20 @@
 # TODOs
 
 - [ ] Clean up all the code
-    - [ ] Remove print() statements
+    - [x] Remove print() statements
     - [ ] Remove commented code
     - [ ] Update README to explain what this is
+
+- [ ] Minor cleanup of windowOffset and windowSize
+    - change setCacheWindow to
+        var desiredCacheWindow: Range {
+            didSet {
+                // update cacheWindow here based on desired values
+            }
+        }
+
+    - [ ] get rid of CacheWindowState and use Range instead
+    - [ ] move numKnownItems out of CacheWindowState to its own ivar
 
 - [ ] Handle cases where we do both update a few items, delete a few items, and insert a few items.
     - do updates first

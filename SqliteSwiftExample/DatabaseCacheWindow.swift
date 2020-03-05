@@ -163,6 +163,41 @@ class DatabaseCacheWindow<ItemProviderType: DatabaseCacheWindowItemProvider> {
         self.provider = provider
     }
     
+    private func removeCachedItem(for identifier: String) {
+        if let firstMatchingIndex = itemLookupIdentifiers.firstIndex(where: { $0 == identifier }) {
+            itemLookupIdentifiers.remove(at: firstMatchingIndex)
+        }
+        itemLookup.removeValue(forKey: identifier)
+    }
+    
+    private func item(for identifier: String) -> ItemProviderType.ItemType? {
+        if let item = itemLookup[identifier] {
+            // Item was looked up, so move it to the end of the list
+            if let itemIndex = itemLookupIdentifiers.firstIndex(of: identifier) {
+                itemLookupIdentifiers.remove(at: itemIndex)
+                itemLookupIdentifiers.append(identifier)
+            } else {
+                assertionFailure("Item we looked up isn't in the itemLookupIdentifiers")
+            }
+            return item
+        } else {
+            let item = provider.item(for: identifier)
+            if let item = item {
+                itemLookup[identifier] = item
+                
+                itemLookupIdentifiers.append(identifier)
+                if itemLookupIdentifiers.count > maxItemsInLookup {
+                    // Drop first item so we keep cache small
+                    let firstCachedItemIdentifier = itemLookupIdentifiers.removeFirst()
+                    itemLookup.removeValue(forKey: firstCachedItemIdentifier)
+                }
+            }
+            return item
+        }
+    }
+    
+    // MARK: Public API
+    
     var numItems: Int {
         return cacheWindowState.numKnownItems
     }
@@ -293,39 +328,6 @@ class DatabaseCacheWindow<ItemProviderType: DatabaseCacheWindowItemProvider> {
         }
         
         return tableOperations
-    }
-    
-    func item(for identifier: String) -> ItemProviderType.ItemType? {
-        if let item = itemLookup[identifier] {
-            // Item was looked up, so move it to the end of the list
-            if let itemIndex = itemLookupIdentifiers.firstIndex(of: identifier) {
-                itemLookupIdentifiers.remove(at: itemIndex)
-                itemLookupIdentifiers.append(identifier)
-            } else {
-                assertionFailure("Item we looked up isn't in the itemLookupIdentifiers")
-            }
-            return item
-        } else {
-            let item = provider.item(for: identifier)
-            if let item = item {
-                itemLookup[identifier] = item
-                
-                itemLookupIdentifiers.append(identifier)
-                if itemLookupIdentifiers.count > maxItemsInLookup {
-                    // Drop first item so we keep cache small
-                    let firstCachedItemIdentifier = itemLookupIdentifiers.removeFirst()
-                    itemLookup.removeValue(forKey: firstCachedItemIdentifier)
-                }
-            }
-            return item
-        }
-    }
-    
-    private func removeCachedItem(for identifier: String) {
-        if let firstMatchingIndex = itemLookupIdentifiers.firstIndex(where: { $0 == identifier }) {
-            itemLookupIdentifiers.remove(at: firstMatchingIndex)
-        }
-        itemLookup.removeValue(forKey: identifier)
     }
     
     // Clear the cache window -- note this does not clear the item lookup
