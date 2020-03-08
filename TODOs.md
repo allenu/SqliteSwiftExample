@@ -5,6 +5,8 @@
     - [ ] Remove commented code
     - [ ] Update README to explain what this is
 
+- [ ] Make Sqlite interaction code in DatabaseManager generic. No need to use "Person" type here.
+
 - [ ] Minor cleanup of windowOffset and windowSize
     - change setCacheWindow to
         var desiredCacheWindow: Range {

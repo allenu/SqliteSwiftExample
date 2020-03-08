@@ -217,48 +217,15 @@ class DatabaseCacheWindow<ItemProviderType: DatabaseCacheWindowItemProvider> {
             // Remove updated item from cache to force new value to be fetched
             removeCachedItem(for: updatedIdentifier)
         }
-        let updatedIndexes: [Int] = updatedIdentifiers.compactMap { identifier in
-            return cachedIdentifiers.firstIndex(where: { $0 == identifier})
-        }
         
         // Stop caching things that are deleted, to save on mem
         removedIdentifiers.forEach { removedIdentifier in
             removeCachedItem(for: removedIdentifier)
         }
         
-        let unsortedDeletedIndexes: [Int] = removedIdentifiers.compactMap { identifier in
-            return cachedIdentifiers.firstIndex(where: { $0 == identifier })
-        }
-        let deletedIndexes = unsortedDeletedIndexes.sorted()
+        var tableOperations: [TableOperation] = []
         
-        // TODO: Handle both update, insert, and delete somehow. We need to be very smart about
-        // the order in which we do it ...
-        
-        let tableOperations: [TableOperation]
-        if deletedIndexes.count > 0 {
-            
-            // Remove those items in reverse order from the cachedIdentifiers
-            deletedIndexes.reversed().forEach { index in
-                cachedIdentifiers.remove(at: index)
-            }
-            cacheWindowState = CacheWindowState(numKnownItems: cacheWindowState.numKnownItems - deletedIndexes.count,
-                                                windowOffset: cacheWindowState.windowOffset,
-                                                windowSize: cacheWindowState.windowSize - deletedIndexes.count)
-            
-            let deleteOperations: [TableOperation] = deletedIndexes.reversed().map { deletedIndex in
-                return TableOperation.remove(at: cacheWindowState.windowOffset + deletedIndex, count: 1)
-            }
-            
-            // Try to grow the cache some more
-            let newSize = cacheWindowState.windowSize + deletedIndexes.count
-            let insertOperations = setCacheWindow(newOffset: cacheWindowState.windowOffset, newSize: newSize)
-            
-            tableOperations = deleteOperations + insertOperations
-        } else if updatedIndexes.count > 0 {
-            tableOperations = updatedIndexes.map { updatedIndex in
-                return TableOperation.update(at: cacheWindowState.windowOffset + updatedIndex, count: 1)
-            }
-        } else if insertedIdentifiers.count > 0 {
+        if insertedIdentifiers.count > 0 {
             var tmpTableOperations: [TableOperation] = []
             
             insertedIdentifiers.forEach { identifier in
@@ -322,10 +289,44 @@ class DatabaseCacheWindow<ItemProviderType: DatabaseCacheWindowItemProvider> {
                 }
             }
 
-            tableOperations = tmpTableOperations
-        } else {
-            tableOperations = []
+            tableOperations = tableOperations + tmpTableOperations
         }
+        
+        let updatedIndexes: [Int] = updatedIdentifiers.compactMap { identifier in
+            return cachedIdentifiers.firstIndex(where: { $0 == identifier})
+        }
+        if updatedIndexes.count > 0 {
+            let updateTableOperations = updatedIndexes.map { updatedIndex in
+                return TableOperation.update(at: cacheWindowState.windowOffset + updatedIndex, count: 1)
+            }
+            tableOperations = tableOperations + updateTableOperations
+        }
+        
+        let unsortedDeletedIndexes: [Int] = removedIdentifiers.compactMap { identifier in
+            return cachedIdentifiers.firstIndex(where: { $0 == identifier })
+        }
+        let deletedIndexes = unsortedDeletedIndexes.sorted()
+        
+        if deletedIndexes.count > 0 {
+            // Remove those items in reverse order from the cachedIdentifiers
+            deletedIndexes.reversed().forEach { index in
+                cachedIdentifiers.remove(at: index)
+            }
+            cacheWindowState = CacheWindowState(numKnownItems: cacheWindowState.numKnownItems - deletedIndexes.count,
+                                                windowOffset: cacheWindowState.windowOffset,
+                                                windowSize: cacheWindowState.windowSize - deletedIndexes.count)
+            
+            let deleteOperations: [TableOperation] = deletedIndexes.reversed().map { deletedIndex in
+                return TableOperation.remove(at: cacheWindowState.windowOffset + deletedIndex, count: 1)
+            }
+            
+            // Try to grow the cache some more
+            let newSize = cacheWindowState.windowSize + deletedIndexes.count
+            let insertOperations = setCacheWindow(newOffset: cacheWindowState.windowOffset, newSize: newSize)
+            
+            tableOperations = tableOperations + deleteOperations + insertOperations
+        }
+
         
         return tableOperations
     }
