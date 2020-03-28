@@ -9,9 +9,74 @@
 import Cocoa
 import SQLite
 
-class ViewController: NSViewController {
+protocol TableOperationProcessingTraits {
+    var tableView: NSTableView! { get }
+    var isAtViewEnd: Bool { get }
+    var expectedNumItems: Int { get }
+
+    func process(tableOperations: [TableOperation])
+}
+
+extension TableOperationProcessingTraits {
+    func process(tableOperations: [TableOperation]) {
+        if tableOperations.count > 0 {
+            var shouldScrollToEnd = false
+            self.tableView.beginUpdates()
+            tableOperations.forEach { operation in
+                switch operation {
+                case .none:
+                    break
+                    
+                case .update(let position, let size):
+                    var indexSet = IndexSet()
+                    Array(position..<(position+size)).forEach { index in
+                        indexSet.insert(index)
+                    }
+                    self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0))
+
+                case .insert(let position, let size):
+                    var indexSet = IndexSet()
+                    Array(position..<(position+size)).forEach { index in
+                        indexSet.insert(index)
+                    }
+                    self.tableView.insertRows(at: indexSet, withAnimation: .slideDown)
+                    // Also scroll to end if needed
+                    if isAtViewEnd {
+                        shouldScrollToEnd = true
+                    } else {
+                        self.tableView.enclosingScrollView?.flashScrollers()
+                    }
+                    
+                case .remove(let position, let size):
+                    var indexSet = IndexSet()
+                    Array(position..<(position+size)).forEach { index in
+                        indexSet.insert(index)
+                    }
+                    self.tableView.removeRows(at: indexSet, withAnimation: .slideUp)
+                    
+                case .reload:
+                    self.tableView.reloadData()
+                }
+            }
+            self.tableView.endUpdates()
+            if shouldScrollToEnd {
+                self.tableView.scrollRowToVisible(expectedNumItems - 1)
+            }
+        } else {
+//            print("no changes to process")
+        }
+    }
+}
+
+class ViewController: NSViewController, TableOperationProcessingTraits {
     var databaseManager: DatabaseManager!
     var databaseCacheWindow: DatabaseCacheWindow<DatabaseManager>!
+    var isAtViewEnd: Bool {
+        return databaseCacheWindow.isViewingEnd
+    }
+    var expectedNumItems: Int {
+        return self.databaseCacheWindow.numItems
+    }
     
     @IBOutlet weak var tableView: NSTableView!
     @IBOutlet weak var searchField: NSSearchField!
@@ -86,54 +151,7 @@ class ViewController: NSViewController {
         databaseManager.deleteLike(name: name)
     }
     
-    func process(tableOperations: [TableOperation]) {
-        if tableOperations.count > 0 {
-            var shouldScrollToEnd = false
-            self.tableView.beginUpdates()
-            tableOperations.forEach { operation in
-                switch operation {
-                case .none:
-                    break
-                    
-                case .update(let position, let size):
-                    var indexSet = IndexSet()
-                    Array(position..<(position+size)).forEach { index in
-                        indexSet.insert(index)
-                    }
-                    self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0))
 
-                case .insert(let position, let size):
-                    var indexSet = IndexSet()
-                    Array(position..<(position+size)).forEach { index in
-                        indexSet.insert(index)
-                    }
-                    self.tableView.insertRows(at: indexSet, withAnimation: .slideDown)
-                    // Also scroll to end if needed
-                    if databaseCacheWindow.isViewingEnd {
-                        shouldScrollToEnd = true
-                    } else {
-                        self.tableView.enclosingScrollView?.flashScrollers()
-                    }
-                    
-                case .remove(let position, let size):
-                    var indexSet = IndexSet()
-                    Array(position..<(position+size)).forEach { index in
-                        indexSet.insert(index)
-                    }
-                    self.tableView.removeRows(at: indexSet, withAnimation: .slideUp)
-                    
-                case .reload:
-                    self.tableView.reloadData()
-                }
-            }
-            self.tableView.endUpdates()
-            if shouldScrollToEnd {
-                self.tableView.scrollRowToVisible(self.databaseCacheWindow.numItems - 1)
-            }
-        } else {
-//            print("no changes to process")
-        }
-    }
     
 }
 
