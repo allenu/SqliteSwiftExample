@@ -1,11 +1,24 @@
 # TODOs
 
+- [x] Refactor things so that ViewController does not have to talk to the DatabaseCacheWindow directly
+    - [x] View Controller should just have an ItemProviderDelegate
+        - num items
+        - item at index
+    - [x] move process() call to an owner of the View Controller
+    - [x] Get rid of the table operation traits mixin
+
+- [ ] BUG: If you insert a whole bunch of entries to the end of the list and then do a deleteLike to delet those entries,
+      the table becomes sparse
+
+- [ ] Figure out a better place to store or calculate isViewingEnd in DatabaseCacheWindow
+
+
 - [ ] Clean up all the code
     - [x] Remove print() statements
     - [ ] Remove commented code
     - [ ] Update README to explain what this is
 
-- [ ] Make Sqlite interaction code in DatabaseManager generic. No need to use "Person" type here.
+- [x] Make Sqlite interaction code in DatabaseManager generic. No need to use "Person" type here.
 
 - [ ] Minor cleanup of windowOffset and windowSize
     - change setCacheWindow to

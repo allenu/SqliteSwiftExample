@@ -221,9 +221,9 @@ class DatabaseManager {
                     
                     do {
                         if try connection.run(paulQuery.update(nameColumn <- newName)) > 0 {
-                            print("updated alice")
+                            print("updated entries")
                         } else {
-                            print("alice not found")
+                            print("entries not found to update")
                         }
                     } catch {
                         print("Couldn't update paul \(person.name)")

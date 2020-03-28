@@ -9,96 +9,33 @@
 import Cocoa
 import SQLite
 
-protocol TableOperationProcessingTraits {
-    var tableView: NSTableView! { get }
-    var isAtViewEnd: Bool { get }
-    var expectedNumItems: Int { get }
-
-    func process(tableOperations: [TableOperation])
-}
-
-extension TableOperationProcessingTraits {
-    func process(tableOperations: [TableOperation]) {
-        if tableOperations.count > 0 {
-            var shouldScrollToEnd = false
-            self.tableView.beginUpdates()
-            tableOperations.forEach { operation in
-                switch operation {
-                case .none:
-                    break
-                    
-                case .update(let position, let size):
-                    var indexSet = IndexSet()
-                    Array(position..<(position+size)).forEach { index in
-                        indexSet.insert(index)
-                    }
-                    self.tableView.reloadData(forRowIndexes: indexSet, columnIndexes: IndexSet(arrayLiteral: 0))
-
-                case .insert(let position, let size):
-                    var indexSet = IndexSet()
-                    Array(position..<(position+size)).forEach { index in
-                        indexSet.insert(index)
-                    }
-                    self.tableView.insertRows(at: indexSet, withAnimation: .slideDown)
-                    // Also scroll to end if needed
-                    if isAtViewEnd {
-                        shouldScrollToEnd = true
-                    } else {
-                        self.tableView.enclosingScrollView?.flashScrollers()
-                    }
-                    
-                case .remove(let position, let size):
-                    var indexSet = IndexSet()
-                    Array(position..<(position+size)).forEach { index in
-                        indexSet.insert(index)
-                    }
-                    self.tableView.removeRows(at: indexSet, withAnimation: .slideUp)
-                    
-                case .reload:
-                    self.tableView.reloadData()
-                }
-            }
-            self.tableView.endUpdates()
-            if shouldScrollToEnd {
-                self.tableView.scrollRowToVisible(expectedNumItems - 1)
-            }
-        } else {
-//            print("no changes to process")
-        }
-    }
-}
-
-class ViewController: NSViewController, TableOperationProcessingTraits {
-    var databaseManager: DatabaseManager!
-    var databaseCacheWindow: DatabaseCacheWindow<DatabaseManager>!
-    var isAtViewEnd: Bool {
-        return databaseCacheWindow.isViewingEnd
-    }
-    var expectedNumItems: Int {
-        return self.databaseCacheWindow.numItems
-    }
+protocol ViewControllerDelegate: class {
+    func viewController(_ viewController: ViewController, didAddPerson name: String)
+    func viewController(_ viewController: ViewController, didUpdateLike name: String)
+    func viewController(_ viewController: ViewController, didDeleteLike name: String)
     
+}
+
+protocol ViewControllerDataSource: class {
+    func numItems(_ viewController: ViewController) -> Int
+    func viewController(_ viewController: ViewController, itemAt index: Int) -> Person?
+    func viewController(_ viewController: ViewController, didUpdateViewWindowStarting offset: Int, size: Int)
+    func viewController(_ viewController: ViewController, didUpdateSearchFilter filter: String?)
+}
+
+class ViewController: NSViewController{
     @IBOutlet weak var tableView: NSTableView!
     @IBOutlet weak var searchField: NSSearchField!
     @IBOutlet weak var deleteLikeTextField: NSTextField!
     @IBOutlet weak var insertTextField: NSTextField!
     @IBOutlet weak var updateLikeTextField: NSTextField!
+    
+    weak var dataSource: ViewControllerDataSource?
+    weak var delegate: ViewControllerDelegate?
 
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        let directory = NSTemporaryDirectory()
-        let subpath = UUID().uuidString
-        let tempUrl = NSURL.fileURL(withPath: directory)
-        let dbUrl = tempUrl.appendingPathComponent("\(subpath)-db.sqlite3")
-        databaseManager = DatabaseManager(fileUrl: dbUrl)
-        databaseCacheWindow = DatabaseCacheWindow(provider: databaseManager)
-        
-        databaseManager.setupTables()
-        DispatchQueue.global().async {
-            self.databaseManager.generateRows(numRows: 150)
-        }
-
         tableView.dataSource = self
         tableView.delegate = self
         
@@ -107,57 +44,35 @@ class ViewController: NSViewController, TableOperationProcessingTraits {
         // Need to listen to when user scrolls too far
         self.tableView.enclosingScrollView?.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(didObserveScroll(notification:)), name: NSView.boundsDidChangeNotification, object: self.tableView.enclosingScrollView?.contentView)
-
-        NotificationCenter.default.addObserver(self, selector: #selector(dataDidChange(notification:)), name: DatabaseManager.dataDidChangeNotification, object: databaseManager)
-
-        NotificationCenter.default.addObserver(self, selector: #selector(dataDidReload(notification:)), name: DatabaseManager.dataDidReloadNotification, object: databaseManager)
-    }
-    
-    @objc func dataDidChange(notification: NSNotification) {
-        let updatedIdentifiers: [String] = (notification.userInfo?["updatedIdentifiers"] as? [String]) ?? []
-        let removedIdentifiers: [String] = (notification.userInfo?["removedIdentifiers"] as? [String]) ?? []
-        let insertedIdentifiers: [String] = (notification.userInfo?["insertedIdentifiers"] as? [String]) ?? []
-        
-        let tableOperations = databaseCacheWindow.updateIfNeeded(updatedIdentifiers: updatedIdentifiers,
-                                                                 insertedIdentifiers: insertedIdentifiers,
-                                                                 removedIdentifiers: removedIdentifiers)
-        
-        process(tableOperations: tableOperations)
-    }
-    
-    @objc func dataDidReload(notification: NSNotification) {
-        databaseCacheWindow.clear()
-        tableView.reloadData()
     }
     
     @objc func didObserveScroll(notification: NSNotification) {
         let visibleRows = tableView.rows(in: tableView.visibleRect)
-        let tableOperations = databaseCacheWindow.setCacheWindow(newOffset: visibleRows.location - 5, newSize: visibleRows.length + 10)
-        process(tableOperations: tableOperations)
+        let offset = visibleRows.location - 5
+        let size = visibleRows.length + 10
+        
+        dataSource?.viewController(self, didUpdateViewWindowStarting: offset, size: size)
     }
     
     @IBAction func didTapInsert(sender: NSButton) {
         let name = insertTextField.stringValue
-        databaseManager.insertPerson(name: name)
+        delegate?.viewController(self, didAddPerson: name)
     }
 
     @IBAction func didTapUpdateLike(sender: NSButton) {
         let name = updateLikeTextField.stringValue
-        databaseManager.updateLike(name: name)
+        delegate?.viewController(self, didUpdateLike: name)
     }
     
     @IBAction func didTapDeleteLike(sender: NSButton) {
         let name = deleteLikeTextField.stringValue
-        databaseManager.deleteLike(name: name)
+        delegate?.viewController(self, didDeleteLike: name)
     }
-    
-
-    
 }
 
 extension ViewController: NSTableViewDataSource {
     public func numberOfRows(in tableView: NSTableView) -> Int {
-        return databaseCacheWindow.numItems
+        return dataSource?.numItems(self) ?? 0
     }
 }
 
@@ -166,7 +81,7 @@ extension ViewController: NSTableViewDelegate {
         
         let aView = tableView.makeView(withIdentifier: NSUserInterfaceItemIdentifier(rawValue: "MyCellView"), owner: nil) as! NSTableCellView
         
-        if let person = databaseCacheWindow.item(at: row) {
+        if let person = dataSource?.viewController(self, itemAt: row) {
             aView.textField?.stringValue = "\(person.identifier) - \(person.name)"
         } else {
             aView.textField?.stringValue = "loading..."
@@ -178,14 +93,14 @@ extension ViewController: NSTableViewDelegate {
 
 extension ViewController: NSSearchFieldDelegate {
     func searchFieldDidStartSearching(_ sender: NSSearchField) {
-        databaseManager.searchFilter = sender.stringValue
+        dataSource?.viewController(self, didUpdateSearchFilter: sender.stringValue)
     }
     
     func searchFieldDidEndSearching(_ sender: NSSearchField) {
-        databaseManager.searchFilter = nil
+        dataSource?.viewController(self, didUpdateSearchFilter: nil)
     }
     
     func controlTextDidChange(_ obj: Notification) {
-        databaseManager.searchFilter = searchField.stringValue
+        dataSource?.viewController(self, didUpdateSearchFilter: searchField.stringValue)
     }
 }
